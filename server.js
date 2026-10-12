@@ -98,6 +98,13 @@ async function getDispenser(conn, id, lock = false) {
   return rows[0];
 }
 
+// Devices authenticate with a shared key (header x-api-key). Disabled if DEVICE_API_KEY is unset.
+const deviceAuth = (req, res, next) => {
+  const key = process.env.DEVICE_API_KEY;
+  if (key && req.get('x-api-key') !== key) return res.status(401).json({ error: 'Invalid or missing API key' });
+  next();
+};
+
 // ---------- health ----------
 app.get('/api/health', wrap(async (req, res) => {
   await pool.query('SELECT 1');
@@ -155,7 +162,7 @@ app.delete('/api/dispensers/:id', wrap(async (req, res) => {
 
 // ---------- device endpoints ----------
 // Heartbeat / telemetry: device reports its sensor values.
-app.post('/api/dispensers/:id/readings', wrap(async (req, res) => {
+app.post('/api/dispensers/:id/readings', deviceAuth, wrap(async (req, res) => {
   const b = req.body || {};
   const out = await tx(async conn => {
     const d = await getDispenser(conn, req.params.id, true);
@@ -170,7 +177,7 @@ app.post('/api/dispensers/:id/readings', wrap(async (req, res) => {
 }));
 
 // A user draws water: logs the event and deducts from the tank atomically.
-app.post('/api/dispensers/:id/dispense', wrap(async (req, res) => {
+app.post('/api/dispensers/:id/dispense', deviceAuth, wrap(async (req, res) => {
   const ml = Math.round(num(req.body?.volume_ml, 'volume_ml', { min: 1, max: 5000 }));
   const out = await tx(async conn => {
     const d = await getDispenser(conn, req.params.id, true);

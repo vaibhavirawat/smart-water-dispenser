@@ -45,3 +45,18 @@ Devices / simulator ──HTTP──▶ Express REST API ──▶ MySQL
 - Background job raises OFFLINE alerts when a device stops reporting.
 - Dashboard polls every 5s, keeps last good data, and shows a Disconnected pill on failure.
 - Graceful shutdown on SIGINT/SIGTERM.
+
+## Real hardware (ESP32)
+`firmware/esp32_dispenser/` contains an Arduino sketch that reports real sensor data:
+
+| Sensor | Pin | Purpose |
+|---|---|---|
+| HC-SR04 ultrasonic | TRIG 5 / ECHO 18 | tank water level |
+| DS18B20 | 4 | water temperature |
+| YF-S201 flow sensor | 19 | volume dispensed |
+
+1. Set `DEVICE_API_KEY` in `.env` and restart the server.
+2. In the sketch set your Wi-Fi, the server's **LAN IP**, the same API key and the dispenser id.
+3. Flash with Arduino IDE (libraries: OneWire, DallasTemperature).
+
+The ESP32 sends a reading every 10 s (doubles as a heartbeat, so the dashboard shows it online) and a dispense event whenever water flows. If it stops reporting, an OFFLINE alert is raised.

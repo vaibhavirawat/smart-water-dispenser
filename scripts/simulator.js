@@ -2,7 +2,7 @@
 // Usage: npm run simulate   (server must be running)
 const BASE = process.env.API || 'http://localhost:3000/api';
 const j = (path, method = 'GET', body) =>
-  fetch(BASE + path, { method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) })
+  fetch(BASE + path, { method, headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.DEVICE_API_KEY || '' }, body: body && JSON.stringify(body) })
     .then(async r => ({ ok: r.ok, data: r.status === 204 ? null : await r.json() }));
 
 (async () => {
