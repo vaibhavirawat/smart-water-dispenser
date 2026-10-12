@@ -93,6 +93,16 @@ const { dbConfig } = require('../db-config');
       [process.env.ADMIN_USERNAME || 'admin', hashPassword(process.env.ADMIN_PASSWORD), 'admin']);
     console.log(`Created admin user "${process.env.ADMIN_USERNAME || 'admin'}".`);
   }
+  // Recovery switch: ADMIN_RESET=true makes the admin account (ADMIN_USERNAME) exist with ADMIN_PASSWORD,
+  // creating it or overwriting its password. Use once, then remove the variable.
+  if (process.env.ADMIN_RESET === 'true') {
+    const name = process.env.ADMIN_USERNAME || 'admin', pw = process.env.ADMIN_PASSWORD || '';
+    if (pw.length < 8) throw new Error('ADMIN_RESET needs ADMIN_PASSWORD of at least 8 characters');
+    await conn.query(
+      "INSERT INTO users (username, password_hash, role) VALUES (?,?,'admin') ON DUPLICATE KEY UPDATE password_hash=VALUES(password_hash), role='admin'",
+      [name, hashPassword(pw)]);
+    console.log(`ADMIN_RESET: "${name}" now has the password from ADMIN_PASSWORD. Remove ADMIN_RESET from your variables.`);
+  }
   console.log('Database ready.');
   await conn.end();
 })().catch(e => { console.error('DB init failed:', e.message); process.exit(1); });

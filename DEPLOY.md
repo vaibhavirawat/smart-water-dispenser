@@ -30,6 +30,13 @@ Already done if you pushed this repo. `.env` and `.env.docker` are git-ignored, 
 
 On every start the container creates missing tables, migrates old ones and creates the admin only if no users exist.
 
+## Can't sign in? Reset the admin password
+The admin is created only the *first* time the app starts, so changing `ADMIN_PASSWORD` later does nothing by itself. To recover:
+1. Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` to what you want, and add `ADMIN_RESET=true`. Deploy.
+2. Sign in with those details.
+3. **Delete `ADMIN_RESET`** from the variables (otherwise the password is reset on every restart) and redeploy.
+(If you were just locked out by too many failed attempts, wait 10 minutes or redeploy.)
+
 ## 3. Password-reset email
 Without email settings, reset links are only printed in the service logs. For real email add SMTP variables
 (any provider: Gmail app password, Brevo, Resend, Mailgun...):
