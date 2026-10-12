@@ -21,7 +21,7 @@ select,input{border:1px solid var(--line);background:var(--panel);border-radius:
 .card .v{font-size:26px;font-weight:700}.card .l{color:var(--muted);font-size:12px}
 .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;min-width:0}
-.panel.wide{grid-column:1/-1}
+.panel.wide,.panel.full{grid-column:1/-1}
 .panel-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
 .table-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse}
@@ -48,3 +48,4 @@ dialog input{display:block;width:100%;margin-top:4px}
 #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#16212e;color:#fff;padding:8px 16px;border-radius:8px;opacity:0;transition:opacity .3s;pointer-events:none}
 #toast.show{opacity:1}
 @media(max-width:800px){.grid{grid-template-columns:1fr}header,main{padding-left:14px;padding-right:14px}}
+.panel.full .chart{max-height:200px}

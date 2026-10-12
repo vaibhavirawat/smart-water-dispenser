@@ -13,7 +13,10 @@ const j = (path, method = 'GET', body) =>
       if (!d.enabled) continue;
       const temp = +(d.temperature_c ?? 9) + (Math.random() - 0.5);
       await j(`/dispensers/${d.id}/readings`, 'POST', { temperature_c: +temp.toFixed(1) });
-      if (Math.random() < 0.6) {
+      if (d.level_pct < 10 && Math.random() < 0.5) {
+        await j(`/dispensers/${d.id}/refill`, 'POST', {}); // technician refills
+        console.log(`${d.name}: refilled`);
+      } else if (Math.random() < 0.35) {
         const ml = [250, 330, 500, 750][Math.floor(Math.random() * 4)];
         const r = await j(`/dispensers/${d.id}/dispense`, 'POST', { volume_ml: ml });
         console.log(r.ok ? `${d.name}: -${ml}ml` : `${d.name}: ${r.data.error}`);
