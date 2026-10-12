@@ -319,15 +319,25 @@ async function checkOffline() {
   }
 }
 
-const server = app.listen(PORT, () => {
-  console.log(`Smart Water Dispenser running at http://localhost:${PORT}`);
-});
-const timer = setInterval(checkOffline, 30_000);
+let server, timer;
+function start(port = PORT) {
+  server = app.listen(port, () => {
+    console.log(`Smart Water Dispenser running at http://localhost:${server.address().port}`);
+  });
+  timer = setInterval(checkOffline, 30_000);
+  return server;
+}
 
 function shutdown() {
   clearInterval(timer);
   server.close(async () => { await pool.end(); process.exit(0); });
   setTimeout(() => process.exit(1), 5000).unref();
 }
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+
+if (require.main === module) {
+  start();
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+}
+
+module.exports = { app, pool, start, checkOffline };

@@ -52,6 +52,12 @@ Devices / simulator ──HTTP──▶ Express REST API ──▶ MySQL
 - Dashboard polls every 5s, keeps last good data, and shows a Disconnected pill on failure.
 - Graceful shutdown on SIGINT/SIGTERM.
 
+## Tests
+```bash
+npm test
+```
+24 integration tests (Node's built-in test runner) run the real app against a throwaway `smart_water_test` database that is created and dropped automatically. They cover login and roles, forged cookies, input validation, dispense/refill logic, alert dedupe and auto-resolve, offline detection, device API-key auth, analytics, cascade deletes, and a concurrency test proving 20 simultaneous dispenses can never overdraw a 5 L tank.
+
 ## Real hardware (ESP32)
 `firmware/esp32_dispenser/` contains an Arduino sketch that reports real sensor data:
 
