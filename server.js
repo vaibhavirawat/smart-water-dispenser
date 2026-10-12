@@ -4,6 +4,9 @@ const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
 const auth = require('./auth');
+const { dbConfig } = require('./db-config');
+const { sendMail } = require('./mailer');
+const crypto = require('crypto');
 
 const PORT = +(process.env.PORT || 3000);
 const OFFLINE_AFTER_MIN = +(process.env.OFFLINE_AFTER_MIN || 2);
@@ -12,11 +15,7 @@ const HIGH_TEMP_C = 25;
 const signupEnabled = () => (process.env.ALLOW_SIGNUP ?? 'true').toLowerCase() !== 'false';
 
 const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  port: +(process.env.DB_PORT || 3306),
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'smart_water',
+  ...dbConfig(),
   waitForConnections: true,
   connectionLimit: 10,
   decimalNumbers: true,
@@ -24,12 +23,25 @@ const pool = mysql.createPool({
 });
 
 auth.setUserLookup(async username =>
-  (await pool.query('SELECT username, role FROM users WHERE username=?', [username]))[0][0]);
+  (await pool.query('SELECT username, role, email, password_hash FROM users WHERE username=?', [username]))[0][0]);
 
 const app = express();
-app.use(cors());
+app.disable('x-powered-by');
+// Behind a reverse proxy (Render, Railway, nginx...) set TRUST_PROXY=1 so req.ip is the real client (rate limits depend on it).
+if (process.env.TRUST_PROXY) app.set('trust proxy', /^\d+$/.test(process.env.TRUST_PROXY) ? +process.env.TRUST_PROXY : process.env.TRUST_PROXY === 'true');
+app.use((req, res, next) => {
+  res.set({
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer',
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+    ...(process.env.COOKIE_SECURE === 'true' && { 'Strict-Transport-Security': 'max-age=15552000; includeSubDomains' }),
+  });
+  next();
+});
+app.use(cors({ origin: process.env.CORS_ORIGIN || false })); // same-origin only unless CORS_ORIGIN is set
 app.use(express.json({ limit: '10kb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), { setHeaders: res => res.set('Cache-Control', 'no-cache') })); // always revalidate, so upgrades show up immediately
 
 // ---------- helpers ----------
 class HttpError extends Error {
@@ -123,6 +135,23 @@ const checkPassword = pw => {
   return pw;
 };
 
+const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]+\.[^\s@]{2,}$/;
+// optional email: returns null when blank, lower-cased address when valid
+const checkEmail = v => {
+  if (v === undefined || v === null || v === '') return null;
+  if (typeof v !== 'string' || v.length > 120 || !EMAIL_RE.test(v.trim())) throw new HttpError(400, 'Enter a valid email address');
+  return v.trim().toLowerCase();
+};
+async function insertUser(username, passwordHash, role, email) {
+  try {
+    await pool.query('INSERT INTO users (username, email, password_hash, role) VALUES (?,?,?,?)', [username, email, passwordHash, role]);
+  } catch (e) {
+    if (e.code === 'ER_DUP_ENTRY')
+      throw new HttpError(409, /email/.test(e.sqlMessage || '') ? 'That email is already registered' : 'That username is already taken');
+    throw e;
+  }
+}
+
 app.get('/api/auth/config', (req, res) => res.json({ signup: signupEnabled() }));
 
 // Public self-registration. Always creates a read-only 'viewer'; the role can't be chosen by the caller.
@@ -133,15 +162,11 @@ app.post('/api/auth/register', wrap(async (req, res) => {
   if (typeof username !== 'string' || !USERNAME_RE.test(username))
     throw new HttpError(400, 'Username must be 3-30 letters, numbers, . _ -');
   checkPassword(password);
+  const email = checkEmail(req.body?.email);
   auth.signupLimiter.record(req.ip);
-  try {
-    await pool.query('INSERT INTO users (username, password_hash, role) VALUES (?,?,?)',
-      [username, auth.hashPassword(password), 'viewer']);
-  } catch (e) {
-    if (e.code === 'ER_DUP_ENTRY') throw new HttpError(409, 'That username is already taken');
-    throw e;
-  }
-  auth.setSession(res, { username, role: 'viewer' });
+  const password_hash = auth.hashPassword(password);
+  await insertUser(username, password_hash, 'viewer', email);
+  auth.setSession(res, { username, role: 'viewer', password_hash });
   res.status(201).json({ username, role: 'viewer' });
 }));
 
@@ -161,6 +186,61 @@ app.post('/api/auth/login', wrap(async (req, res) => {
 }));
 app.post('/api/auth/logout', (req, res) => { auth.clearSession(res); res.json({ ok: true }); });
 app.get('/api/auth/me', auth.requireAuth, (req, res) => res.json(req.user));
+
+// Account email (used for password reset)
+app.put('/api/auth/email', auth.requireAuth, wrap(async (req, res) => {
+  const email = checkEmail(req.body?.email);
+  try {
+    await pool.query('UPDATE users SET email=? WHERE username=?', [email, req.user.username]);
+  } catch (e) {
+    if (e.code === 'ER_DUP_ENTRY') throw new HttpError(409, 'That email is already registered');
+    throw e;
+  }
+  res.json({ email });
+}));
+
+// ---------- password reset ----------
+const sha256 = v => crypto.createHash('sha256').update(v).digest('hex');
+const baseUrl = () => (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, ''); // never trust the Host header here
+
+app.post('/api/auth/forgot', wrap(async (req, res) => {
+  if (auth.forgotLimiter.blocked(req.ip)) throw new HttpError(429, 'Too many requests. Try again later.');
+  const id = typeof req.body?.identifier === 'string' ? req.body.identifier.trim().toLowerCase() : '';
+  if (!id) throw new HttpError(400, 'Enter your username or email');
+  auth.forgotLimiter.record(req.ip);
+
+  const [rows] = await pool.query('SELECT username, email FROM users WHERE (username=? OR email=?) AND email IS NOT NULL LIMIT 1', [id, id]);
+  if (rows[0]) {
+    const token = crypto.randomBytes(32).toString('hex'); // only its hash is stored
+    await tx(async conn => {
+      await conn.query('DELETE FROM password_resets WHERE username=?', [rows[0].username]);
+      await conn.query('INSERT INTO password_resets (username, token_hash, expires_at) VALUES (?,?, NOW() + INTERVAL 1 HOUR)',
+        [rows[0].username, sha256(token)]);
+    });
+    try {
+      await sendMail({
+        to: rows[0].email,
+        subject: 'Reset your Smart Water Dispenser password',
+        text: `Hi ${rows[0].username},\n\nUse this link to choose a new password (valid for 1 hour, works once):\n\n${baseUrl()}/login.html#reset=${token}\n\nIf you didn't ask for this, you can ignore this email.`,
+      });
+    } catch (e) { console.error('reset email failed:', e.message); }
+  }
+  // identical answer whether or not the account exists, so this can't be used to find usernames/emails
+  res.json({ ok: true, message: 'If that account has an email address on file, a reset link is on its way.' });
+}));
+
+app.post('/api/auth/reset', wrap(async (req, res) => {
+  const { token, password } = req.body || {};
+  checkPassword(password);
+  if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) throw new HttpError(400, 'This reset link is invalid or has expired');
+  await tx(async conn => {
+    const [rows] = await conn.query('SELECT username FROM password_resets WHERE token_hash=? AND expires_at > NOW() FOR UPDATE', [sha256(token)]);
+    if (!rows[0]) throw new HttpError(400, 'This reset link is invalid or has expired');
+    await conn.query('UPDATE users SET password_hash=? WHERE username=?', [auth.hashPassword(password), rows[0].username]);
+    await conn.query('DELETE FROM password_resets WHERE username=?', [rows[0].username]); // single use
+  });
+  res.json({ ok: true });
+}));
 
 // ---------- health ----------
 app.get('/api/health', wrap(async (req, res) => {
@@ -362,7 +442,7 @@ app.get('/api/export/events.csv', auth.requireAuth, wrap(async (req, res) => {
 
 // ---------- user management ----------
 app.get('/api/users', auth.requireAdmin, wrap(async (req, res) => {
-  const [rows] = await pool.query('SELECT username, role, created_at FROM users ORDER BY created_at, username');
+  const [rows] = await pool.query('SELECT username, email, role, created_at FROM users ORDER BY created_at, username');
   res.json(rows);
 }));
 
@@ -371,13 +451,7 @@ app.post('/api/users', auth.requireAdmin, wrap(async (req, res) => {
   if (!USERNAME_RE.test(username || '')) throw new HttpError(400, 'Username must be 3-30 letters, numbers, . _ -');
   if (!['admin', 'viewer'].includes(role)) throw new HttpError(400, 'Role must be admin or viewer');
   checkPassword(password);
-  try {
-    await pool.query('INSERT INTO users (username, password_hash, role) VALUES (?,?,?)',
-      [username, auth.hashPassword(password), role]);
-  } catch (e) {
-    if (e.code === 'ER_DUP_ENTRY') throw new HttpError(409, 'That username already exists');
-    throw e;
-  }
+  await insertUser(username, auth.hashPassword(password), role, checkEmail(req.body?.email));
   res.status(201).json({ username, role });
 }));
 
@@ -403,7 +477,9 @@ app.post('/api/auth/password', auth.requireAuth, wrap(async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM users WHERE username=?', [req.user.username]);
   if (!rows[0] || typeof current_password !== 'string' || !auth.verifyPassword(current_password, rows[0].password_hash))
     throw new HttpError(401, 'Current password is incorrect');
-  await pool.query('UPDATE users SET password_hash=? WHERE username=?', [auth.hashPassword(new_password), req.user.username]);
+  const password_hash = auth.hashPassword(new_password);
+  await pool.query('UPDATE users SET password_hash=? WHERE username=?', [password_hash, req.user.username]);
+  auth.setSession(res, { username: req.user.username, role: req.user.role, password_hash }); // keep this device signed in; all others are signed out
   res.json({ ok: true });
 }));
 

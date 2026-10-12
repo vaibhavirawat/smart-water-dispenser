@@ -96,6 +96,7 @@
   <ul id="userList" class="events"></ul>
   <form id="userForm" class="inline" autocomplete="off">
     <input name="username" placeholder="username" required minlength="3" maxlength="30">
+    <input name="email" type="email" placeholder="email (optional)">
     <input name="password" type="password" placeholder="password (8+)" required minlength="8">
     <select name="role"><option value="viewer">viewer</option><option value="admin">admin</option></select>
     <button class="primary">Add user</button>
@@ -105,6 +106,13 @@
 
 <!-- password -->
 <dialog id="pwDlg">
+  <form id="emailForm" autocomplete="off">
+    <h3>Account</h3>
+    <label>Email (used if you forget your password) <input name="email" type="email" placeholder="you@example.com"></label>
+    <p id="emailMsg" class="err"></p>
+    <div class="actions"><button class="primary">Save email</button></div>
+  </form>
+  <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
   <form id="pwForm">
     <h3>Change password</h3>
     <label>Current password <input name="current" type="password" required autocomplete="current-password"></label>

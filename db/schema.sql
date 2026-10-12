@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS alerts (
 CREATE TABLE IF NOT EXISTS users (
   id            INT AUTO_INCREMENT PRIMARY KEY,
   username      VARCHAR(50) NOT NULL UNIQUE,
+  email         VARCHAR(120) NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
   role          ENUM('admin','viewer') NOT NULL DEFAULT 'viewer',
   created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -60,4 +61,14 @@ CREATE TABLE IF NOT EXISTS level_readings (
   created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_disp_time (dispenser_id, created_at),
   FOREIGN KEY (dispenser_id) REFERENCES dispensers(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS password_resets (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  username    VARCHAR(50) NOT NULL,
+  token_hash  CHAR(64) NOT NULL UNIQUE,
+  expires_at  DATETIME NOT NULL,
+  created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_user (username),
+  FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB;

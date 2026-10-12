@@ -4,23 +4,38 @@ const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
 const { hashPassword } = require('../auth');
+const { dbConfig } = require('../db-config');
 
 (async () => {
-  const conn = await mysql.createConnection({
-    host: process.env.DB_HOST || 'localhost',
-    port: +(process.env.DB_PORT || 3306),
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || '',
-    multipleStatements: true,
-  });
-  const dbName = process.env.DB_NAME || 'smart_water';
-  if (!/^\w+$/.test(dbName)) throw new Error('DB_NAME may only contain letters, numbers and underscores');
-  const schema = fs.readFileSync(path.join(__dirname, '../db/schema.sql'), 'utf8').replace(/\bsmart_water\b/g, dbName);
+  const cfg = dbConfig();
+  const { database, ...server } = cfg;
+
+  // Connect to the database directly (hosted DBs often forbid CREATE DATABASE); create it only if missing.
+  let conn;
+  try {
+    conn = await mysql.createConnection({ ...cfg, multipleStatements: true });
+  } catch (e) {
+    if (e.code !== 'ER_BAD_DB_ERROR') throw e;
+    const root = await mysql.createConnection(server);
+    await root.query(`CREATE DATABASE \`${database}\``);
+    await root.end();
+    conn = await mysql.createConnection({ ...cfg, multipleStatements: true });
+  }
+
+  // schema.sql starts with CREATE DATABASE / USE for convenience; we're already connected, so drop those lines
+  const schema = fs.readFileSync(path.join(__dirname, '../db/schema.sql'), 'utf8')
+    .replace(/^CREATE DATABASE.*$/m, '').replace(/^USE .*$/m, '');
   await conn.query(schema);
-  await conn.query(`USE \`${dbName}\``);
+
+  // migration: databases created before password reset existed have no email column
+  const [cols] = await conn.query("SHOW COLUMNS FROM users LIKE 'email'");
+  if (!cols.length) {
+    await conn.query('ALTER TABLE users ADD COLUMN email VARCHAR(120) NULL UNIQUE AFTER username');
+    console.log('Migrated: added users.email');
+  }
 
   const [[{ n }]] = await conn.query('SELECT COUNT(*) n FROM dispensers');
-  if (n === 0) {
+  if (n === 0 && process.env.SEED_DEMO !== 'false') { // set SEED_DEMO=false in production to start empty
     const seed = [
       ['Lobby Dispenser', 'Main Building - Lobby', 20, 17.5, 8.2],
       ['Library Dispenser', 'Library - 2nd Floor', 20, 11.0, 9.0],

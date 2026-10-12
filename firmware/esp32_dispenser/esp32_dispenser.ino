@@ -3,13 +3,14 @@
 // Libraries (Library Manager): OneWire, DallasTemperature. WiFi/HTTPClient/ArduinoJson-free (JSON built by hand).
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 
 // ---- configure these ----
 const char* WIFI_SSID = "YOUR_WIFI";
 const char* WIFI_PASS = "YOUR_PASSWORD";
-const char* SERVER    = "http://192.168.1.50:3000";  // your computer's LAN IP, not localhost
+const char* SERVER    = "http://192.168.1.50:3000";  // LAN IP, or your deployed https://... address
 const char* API_KEY   = "";                          // must match DEVICE_API_KEY in .env
 const int   DISPENSER_ID = 1;                        // id from the dashboard
 const float TANK_HEIGHT_CM = 40.0;                   // sensor-to-bottom distance when tank is empty
@@ -37,7 +38,13 @@ float readDistanceCm() {
 bool post(const String& path, const String& body) {
   if (WiFi.status() != WL_CONNECTED) return false;
   HTTPClient http;
-  http.begin(String(SERVER) + path);
+  WiFiClientSecure tls;
+  if (String(SERVER).startsWith("https")) {
+    tls.setInsecure();  // skips certificate checking; for production pin the CA with tls.setCACert(...)
+    http.begin(tls, String(SERVER) + path);
+  } else {
+    http.begin(String(SERVER) + path);
+  }
   http.addHeader("Content-Type", "application/json");
   if (strlen(API_KEY)) http.addHeader("x-api-key", API_KEY);
   int code = http.POST(body);

@@ -284,7 +284,7 @@ form.addEventListener('submit', async e => {
 async function loadUsers() {
   const users = await api('/users');
   $('#userList').innerHTML = users.map(u => `
-    <li><span><b>${esc(u.username)}</b> <span class="badge ${u.role === 'admin' ? 'OK' : 'OFFLINE'}">${u.role}</span></span>
+    <li><span><b>${esc(u.username)}</b> <small class="muted">${esc(u.email || 'no email')}</small> <span class="badge ${u.role === 'admin' ? 'OK' : 'OFFLINE'}">${u.role}</span></span>
     ${u.username === me.username ? '<span class="muted">you</span>' : `<span>
       <button class="sm" data-role="${esc(u.username)}" data-to="${u.role === 'admin' ? 'viewer' : 'admin'}">Make ${u.role === 'admin' ? 'viewer' : 'admin'}</button>
       <button class="sm danger" data-del="${esc(u.username)}">Remove</button></span>`}</li>`).join('');
@@ -302,13 +302,22 @@ $('#userList').addEventListener('click', async e => {
 $('#userForm').addEventListener('submit', async e => {
   e.preventDefault(); const f = e.target; $('#userErr').textContent = '';
   try {
-    await api('/users', 'POST', { username: f.username.value.trim(), password: f.password.value, role: f.role.value });
+    await api('/users', 'POST', { username: f.username.value.trim(), email: f.email.value.trim() || undefined, password: f.password.value, role: f.role.value });
     f.reset(); toast('User added'); loadUsers();
   } catch (err) { $('#userErr').textContent = err.message; }
 });
 
 // ---------- password ----------
-$('#pwBtn').onclick = () => { $('#pwForm').reset(); $('#pwErr').textContent = ''; $('#pwDlg').showModal(); };
+$('#pwBtn').onclick = async () => {
+  $('#pwForm').reset(); $('#pwErr').textContent = ''; $('#emailMsg').textContent = '';
+  try { $('#emailForm').email.value = (await api('/auth/me')).email || ''; } catch {}
+  $('#pwDlg').showModal();
+};
+$('#emailForm').addEventListener('submit', async e => {
+  e.preventDefault(); const m = $('#emailMsg');
+  try { await api('/auth/email', 'PUT', { email: e.target.email.value.trim() }); m.style.color = 'var(--green)'; m.textContent = 'Saved'; }
+  catch (err) { m.style.color = 'var(--red)'; m.textContent = err.message; }
+});
 $('#pwForm').addEventListener('submit', async e => {
   e.preventDefault(); const f = e.target;
   try {

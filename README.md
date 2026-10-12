@@ -15,9 +15,10 @@ A full-stack system for monitoring a fleet of smart water dispensers: devices re
 - **Dispenser detail view**: 24-hour level history chart and recent dispenses
 - **Automatic alerts**: low level, empty, high temperature, device offline (deduplicated, auto-resolving)
 - **Role-based access**: admins manage dispensers and users; viewers get a read-only dashboard
+- **Forgot password**: single-use, 1-hour reset links (hashed in the database); changing or resetting a password signs out all other sessions
 - **User management** (add, remove, promote/demote) and **change password** from the UI
 - **CSV export** of dispense history
-- Device simulator, ESP32 firmware, Docker Compose, 39 automated tests and CI
+- Device simulator, ESP32 firmware, Docker Compose, 51 automated tests and CI
 
 <details><summary>More screenshots</summary>
 <p><img src="docs/detail.png" alt="Dispenser detail" width="80%"></p>
@@ -61,6 +62,8 @@ Devices / simulator ──HTTP──▶ Express REST API ──▶ MySQL
 - Dashboard login with `admin` (full control) and `viewer` (read-only) roles; the API enforces roles, not just the UI.
 - Passwords hashed with scrypt + per-user salt; sessions are HMAC-signed HttpOnly, SameSite=Strict cookies (12 h).
 - Every request re-checks the user in the database, so removed users and role changes take effect immediately.
+- Security headers (CSP, nosniff, frame denial, HSTS when HTTPS), same-origin API, `Secure` cookies via `COOKIE_SECURE`.
+- Reset links are built from `BASE_URL`, never the request's Host header; the reset endpoint never reveals whether an account exists.
 - CSV export neutralises spreadsheet formula injection.
 - Login throttling (8 failed attempts / 10 min / IP); sign-ups limited to 5 / hour / IP (`SIGNUP_LIMIT`). Self-registration can never create an admin. Devices use a separate shared `x-api-key`.
 
@@ -79,11 +82,14 @@ docker compose --env-file .env.docker up --build
 ```
 Open http://localhost:3000 and sign in with `ADMIN_USERNAME` / `ADMIN_PASSWORD` from `.env.docker`. Compose starts MySQL, waits for it to be healthy, creates the schema, sample data and the first admin, then starts the app. Data persists in a Docker volume; `docker compose down -v` wipes it. The database port is not exposed to the host.
 
+## Deploy
+See [DEPLOY.md](DEPLOY.md) for putting it online with HTTPS (Railway + managed MySQL), email setup for password reset and a security checklist.
+
 ## Tests
 ```bash
 npm test
 ```
-39 integration tests (Node's built-in test runner) run the real app against a throwaway `smart_water_test` database that is created and dropped automatically. They cover login and roles, forged cookies, input validation, dispense/refill logic, alert dedupe and auto-resolve, offline detection, device API-key auth, analytics, cascade deletes, and a concurrency test proving 20 simultaneous dispenses can never overdraw a 5 L tank.
+51 integration tests (Node's built-in test runner) run the real app against a throwaway `smart_water_test` database that is created and dropped automatically. They cover login and roles, forged cookies, input validation, dispense/refill logic, alert dedupe and auto-resolve, offline detection, device API-key auth, analytics, cascade deletes, and a concurrency test proving 20 simultaneous dispenses can never overdraw a 5 L tank.
 
 ## Real hardware (ESP32)
 `firmware/esp32_dispenser/` contains an Arduino sketch that reports real sensor data:
