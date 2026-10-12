@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/",
+    "test": "node --test \"test/**/*.test.js\"",
     "db:init": "node scripts/init-db.js",
     "simulate": "node scripts/simulator.js",
     "create-user": "node scripts/create-user.js"
