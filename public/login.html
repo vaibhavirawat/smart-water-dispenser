@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in – Smart Water Dispenser</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body{display:grid;place-items:center;min-height:100vh}
+  .box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:28px;width:min(360px,92vw)}
+  .box h1{font-size:20px;margin-bottom:4px}
+  .box label{display:block;margin:14px 0 0;font-size:12px;color:var(--muted)}
+  .box input{display:block;width:100%;margin-top:4px}
+  .box button{width:100%;margin-top:18px;padding:9px}
+</style>
+</head>
+<body>
+<form class="box" id="f">
+  <h1>💧 Smart Water Dispenser</h1>
+  <div class="muted">Sign in to continue</div>
+  <label>Username <input name="username" autocomplete="username" required autofocus></label>
+  <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+  <p class="err" id="err"></p>
+  <button class="primary" type="submit">Sign in</button>
+</form>
+<script>
+document.getElementById('f').addEventListener('submit', async e => {
+  e.preventDefault();
+  const f = e.target, err = document.getElementById('err');
+  err.textContent = '';
+  try {
+    const r = await fetch('/api/auth/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: f.username.value, password: f.password.value }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || 'Login failed');
+    location.href = '/';
+  } catch (x) { err.textContent = x.message; }
+});
+</script>
+</body>
+</html>

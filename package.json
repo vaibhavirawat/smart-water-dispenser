@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "db:init": "node scripts/init-db.js",
-    "simulate": "node scripts/simulator.js"
+    "simulate": "node scripts/simulator.js",
+    "create-user": "node scripts/create-user.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

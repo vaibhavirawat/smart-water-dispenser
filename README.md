@@ -22,8 +22,9 @@ Devices / simulator ──HTTP──▶ Express REST API ──▶ MySQL
 1. Make sure MySQL is running; edit `.env` if your credentials differ.
 2. `npm install`
 3. `cp .env.example .env` (first time only), then `npm run db:init`  (creates schema + sample data)
-4. `npm start` → http://localhost:3000
-5. Optional: `npm run simulate` for live fake traffic.
+4. Create a login: `npm run create-user -- admin admin` (prints a random password once; add a third argument to choose your own). Use role `viewer` for read-only users.
+5. `npm start` → http://localhost:3000
+6. Optional: `npm run simulate` for live fake traffic.
 
 ## REST API
 | Method | Path | Purpose |
@@ -37,6 +38,11 @@ Devices / simulator ──HTTP──▶ Express REST API ──▶ MySQL
 | GET | /api/stats, /api/usage/daily, /api/usage/hourly | dashboard data |
 | GET | /api/alerts, POST /api/alerts/:id/resolve | alerts |
 | GET | /api/health | liveness + DB check |
+
+## Security
+- Dashboard login with `admin` (full control) and `viewer` (read-only) roles; the API enforces roles, not just the UI.
+- Passwords hashed with scrypt + per-user salt; sessions are HMAC-signed HttpOnly, SameSite=Strict cookies (12 h).
+- Login throttling (8 failed attempts / 10 min / IP). Devices use a separate shared `x-api-key`.
 
 ## Reliability design
 - Connection pool, parameterized queries, input validation.

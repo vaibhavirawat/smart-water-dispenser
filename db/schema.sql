@@ -43,3 +43,11 @@ CREATE TABLE IF NOT EXISTS alerts (
   INDEX idx_open (resolved, dispenser_id, type),
   FOREIGN KEY (dispenser_id) REFERENCES dispensers(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS users (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  username      VARCHAR(50) NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  role          ENUM('admin','viewer') NOT NULL DEFAULT 'viewer',
+  created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;

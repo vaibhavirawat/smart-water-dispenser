@@ -1,12 +1,13 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-let dispensers = [], editingId = null, failures = 0;
+let dispensers = [], editingId = null, failures = 0, isAdmin = false;
 
 async function api(path, method = 'GET', body) {
   const r = await fetch('/api' + path, {
     method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
   });
   const data = r.status === 204 ? null : await r.json().catch(() => ({}));
+  if (r.status === 401 && !path.startsWith('/auth/login')) { location.href = '/login.html'; throw new Error('Login required'); }
   if (!r.ok) throw new Error(data?.error || `Request failed (${r.status})`);
   return data;
 }
@@ -48,11 +49,11 @@ function renderTable() {
       <td>${(d.today_ml / 1000).toFixed(1)} L</td>
       <td><span class="badge ${d.status}">${d.status}</span></td>
       <td><small>${ago(d.last_seen)}</small></td>
-      <td>
+      <td>${!isAdmin ? '' : `
         <button class="sm" data-act="refill" data-id="${d.id}">Refill</button>
         <button class="sm" data-act="toggle" data-id="${d.id}">${d.enabled ? 'Disable' : 'Enable'}</button>
         <button class="sm" data-act="edit" data-id="${d.id}">Edit</button>
-        <button class="sm" data-act="delete" data-id="${d.id}">✕</button>
+        <button class="sm" data-act="delete" data-id="${d.id}">✕</button>`}
       </td>
     </tr>`).join('') : '<tr><td colspan="8" class="empty">No dispensers match.</td></tr>';
 }
@@ -60,7 +61,7 @@ function renderTable() {
 function renderAlerts(list) {
   $('#alerts').innerHTML = list.length ? list.map(a => `
     <li><div><span class="t">${a.type.replace('_', ' ')}</span><br>${esc(a.message)} <small class="muted">${ago(a.created_at)}</small></div>
-    <button class="sm" data-resolve="${a.id}">Resolve</button></li>`).join('') : '<li class="empty">No open alerts 🎉</li>';
+    ${isAdmin ? `<button class="sm" data-resolve="${a.id}">Resolve</button>` : ''}</li>`).join('') : '<li class="empty">No open alerts 🎉</li>';
 }
 
 function barChart(el, data, label) {
@@ -139,5 +140,16 @@ form.addEventListener('submit', async e => {
   } catch (err) { $('#formErr').textContent = err.message; }
 });
 
-refresh();
-setInterval(refresh, 5000);
+$('#logout').onclick = async () => {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  location.href = '/login.html';
+};
+
+(async () => {
+  const me = await api('/auth/me');          // redirects to login on 401
+  isAdmin = me.role === 'admin';
+  $('#who').textContent = `${me.username} (${me.role})`;
+  $('#addBtn').hidden = !isAdmin;
+  refresh();
+  setInterval(refresh, 5000);
+})();
