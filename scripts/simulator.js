@@ -16,13 +16,21 @@ async function j(path, method = 'GET', body) {
 }
 
 (async () => {
+  console.log(`Using ${BASE}`);
   const { SIM_USER, SIM_PASSWORD } = process.env;
   if (!SIM_USER || !SIM_PASSWORD) {
     console.error('Set SIM_USER and SIM_PASSWORD (an admin account), e.g.\n  SIM_USER=admin SIM_PASSWORD=yourpass npm run simulate');
     process.exit(1);
   }
   const login = await j('/auth/login', 'POST', { username: SIM_USER, password: SIM_PASSWORD });
-  if (!login.ok) { console.error('Login failed:', login.data.error); process.exit(1); }
+  if (!login.ok) {
+    console.error(`Login failed (HTTP ${login.status}):`, login.data.error || 'the server did not answer like this app');
+    if (login.status === 404 || !login.data.error)
+      console.error(`Check API=${BASE}\n  It must look like https://YOUR-APP.up.railway.app/api (https, your real domain, ending in /api).`);
+    else if (login.status === 401) console.error('Wrong SIM_USER / SIM_PASSWORD for THIS server (the live site has its own admin password).');
+    else if (login.status === 429) console.error('Too many failed attempts; wait about 10 minutes.');
+    process.exit(1);
+  }
   console.log(`Simulator running as ${SIM_USER}. Ctrl+C to stop.`);
 
   setInterval(async () => {
