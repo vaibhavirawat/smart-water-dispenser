@@ -31,6 +31,7 @@ services:
       DB_NAME: smart_water
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
       DEVICE_API_KEY: ${DEVICE_API_KEY:-}
+      ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
     healthcheck:

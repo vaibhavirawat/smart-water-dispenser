@@ -9,6 +9,7 @@ const PORT = +(process.env.PORT || 3000);
 const OFFLINE_AFTER_MIN = +(process.env.OFFLINE_AFTER_MIN || 2);
 const LOW_LEVEL_PCT = +(process.env.LOW_LEVEL_PCT || 20);
 const HIGH_TEMP_C = 25;
+const signupEnabled = () => (process.env.ALLOW_SIGNUP ?? 'true').toLowerCase() !== 'false';
 
 const pool = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
@@ -115,6 +116,35 @@ const deviceAuth = (req, res, next) => {
 };
 
 // ---------- auth ----------
+const USERNAME_RE = /^[A-Za-z0-9_.-]{3,30}$/;
+const checkPassword = pw => {
+  if (typeof pw !== 'string' || pw.length < 8 || pw.length > 100)
+    throw new HttpError(400, 'Password must be 8-100 characters');
+  return pw;
+};
+
+app.get('/api/auth/config', (req, res) => res.json({ signup: signupEnabled() }));
+
+// Public self-registration. Always creates a read-only 'viewer'; the role can't be chosen by the caller.
+app.post('/api/auth/register', wrap(async (req, res) => {
+  if (!signupEnabled()) throw new HttpError(403, 'Sign-up is disabled. Ask an administrator for an account.');
+  if (auth.signupLimiter.blocked(req.ip)) throw new HttpError(429, 'Too many sign-ups from this address. Try again later.');
+  const { username, password } = req.body || {};
+  if (typeof username !== 'string' || !USERNAME_RE.test(username))
+    throw new HttpError(400, 'Username must be 3-30 letters, numbers, . _ -');
+  checkPassword(password);
+  auth.signupLimiter.record(req.ip);
+  try {
+    await pool.query('INSERT INTO users (username, password_hash, role) VALUES (?,?,?)',
+      [username, auth.hashPassword(password), 'viewer']);
+  } catch (e) {
+    if (e.code === 'ER_DUP_ENTRY') throw new HttpError(409, 'That username is already taken');
+    throw e;
+  }
+  auth.setSession(res, { username, role: 'viewer' });
+  res.status(201).json({ username, role: 'viewer' });
+}));
+
 app.post('/api/auth/login', wrap(async (req, res) => {
   const ip = req.ip;
   if (auth.throttled(ip)) throw new HttpError(429, 'Too many failed attempts. Try again in a few minutes.');
@@ -331,13 +361,6 @@ app.get('/api/export/events.csv', auth.requireAuth, wrap(async (req, res) => {
 }));
 
 // ---------- user management ----------
-const USERNAME_RE = /^[A-Za-z0-9_.-]{3,30}$/;
-const checkPassword = pw => {
-  if (typeof pw !== 'string' || pw.length < 8 || pw.length > 100)
-    throw new HttpError(400, 'Password must be 8-100 characters');
-  return pw;
-};
-
 app.get('/api/users', auth.requireAdmin, wrap(async (req, res) => {
   const [rows] = await pool.query('SELECT username, role, created_at FROM users ORDER BY created_at, username');
   res.json(rows);
@@ -363,6 +386,15 @@ app.delete('/api/users/:username', auth.requireAdmin, wrap(async (req, res) => {
   const [r] = await pool.query('DELETE FROM users WHERE username=?', [req.params.username]);
   if (!r.affectedRows) throw new HttpError(404, 'User not found');
   res.status(204).end();
+}));
+
+app.put('/api/users/:username/role', auth.requireAdmin, wrap(async (req, res) => {
+  const role = req.body?.role;
+  if (!['admin', 'viewer'].includes(role)) throw new HttpError(400, 'Role must be admin or viewer');
+  if (req.params.username === req.user.username) throw new HttpError(400, "You can't change your own role");
+  const [r] = await pool.query('UPDATE users SET role=? WHERE username=?', [role, req.params.username]);
+  if (!r.affectedRows) throw new HttpError(404, 'User not found');
+  res.json({ username: req.params.username, role });
 }));
 
 app.post('/api/auth/password', auth.requireAuth, wrap(async (req, res) => {

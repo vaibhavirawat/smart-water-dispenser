@@ -5,6 +5,7 @@ process.env.DEVICE_API_KEY = 'test-device-key';
 process.env.SESSION_SECRET = 'test-secret';
 process.env.OFFLINE_AFTER_MIN = '2';
 process.env.LOW_LEVEL_PCT = '20';
+process.env.SIGNUP_LIMIT = '1000';
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
@@ -370,4 +371,72 @@ test('role changes in the database apply to existing sessions', async () => {
   assert.equal((await u.get('/api/users')).status, 200);
   await pool.query("UPDATE users SET role='viewer' WHERE username='promo'");
   assert.equal((await u.get('/api/users')).status, 403);
+});
+
+// ---------- self sign-up ----------
+test('sign-up config is public and reflects ALLOW_SIGNUP', async () => {
+  assert.deepEqual((await client().get('/api/auth/config')).body, { signup: true });
+  process.env.ALLOW_SIGNUP = 'false';
+  assert.deepEqual((await client().get('/api/auth/config')).body, { signup: false });
+  delete process.env.ALLOW_SIGNUP;
+});
+
+test('anyone can register; they get a viewer session, never an admin', async () => {
+  const c = client();
+  const r = await c.post('/api/auth/register', { username: 'newbie', password: 'Newbie-Pass1', role: 'admin', is_admin: true });
+  assert.equal(r.status, 201);
+  assert.deepEqual(r.body, { username: 'newbie', role: 'viewer' }, 'role in the request body is ignored');
+  assert.deepEqual((await c.get('/api/auth/me')).body, { username: 'newbie', role: 'viewer' }, 'auto-logged-in');
+  assert.equal((await c.get('/api/dispensers')).status, 200);
+  assert.equal((await c.post('/api/dispensers', { name: 'x', location: 'y' })).status, 403);
+  assert.equal((await c.get('/api/users')).status, 403);
+  assert.equal((await client().login('newbie', 'Newbie-Pass1')).status, 200, 'can sign in again later');
+  const [stored] = await pool.query("SELECT role FROM users WHERE username='newbie'");
+  assert.equal(stored[0].role, 'viewer');
+});
+
+test('register rejects duplicates and invalid input', async () => {
+  assert.equal((await client().post('/api/auth/register', { username: 'newbie', password: 'Another-Pass1' })).status, 409);
+  assert.equal((await client().post('/api/auth/register', { username: 'admin', password: 'Another-Pass1' })).status, 409);
+  const bad = [
+    {}, { username: 'ab', password: 'Valid-Pass1' }, { username: 'has space', password: 'Valid-Pass1' },
+    { username: 'okname', password: 'short' }, { username: 'okname' }, { username: ['a'], password: 'Valid-Pass1' },
+    { username: { $ne: 1 }, password: 'Valid-Pass1' }, { username: 'a'.repeat(31), password: 'Valid-Pass1' },
+  ];
+  for (const b of bad) assert.equal((await client().post('/api/auth/register', b)).status, 400, JSON.stringify(b));
+});
+
+test('sign-up can be switched off', async () => {
+  process.env.ALLOW_SIGNUP = 'false';
+  try {
+    assert.equal((await client().post('/api/auth/register', { username: 'blocked1', password: 'Valid-Pass1' })).status, 403);
+  } finally { delete process.env.ALLOW_SIGNUP; }
+  const [rows] = await pool.query("SELECT 1 FROM users WHERE username='blocked1'");
+  assert.equal(rows.length, 0);
+});
+
+test('rate limiter blocks after N hits and is per key', () => {
+  const { makeLimiter } = require('../auth');
+  const l = makeLimiter(3, 60000);
+  for (let i = 0; i < 3; i++) { assert.equal(l.blocked('a'), false); l.record('a'); }
+  assert.equal(l.blocked('a'), true);
+  assert.equal(l.blocked('b'), false);
+});
+
+// ---------- role management ----------
+test('admin can promote and demote; invalid cases are refused', async () => {
+  await admin.post('/api/users', { username: 'rolekid', password: 'RoleKid-Pass1', role: 'viewer' });
+  const u = client(); await u.login('rolekid', 'RoleKid-Pass1');
+  assert.equal((await u.get('/api/users')).status, 403);
+
+  assert.equal((await admin.put('/api/users/rolekid/role', { role: 'admin' })).status, 200);
+  assert.equal((await u.get('/api/users')).status, 200, 'promotion applies to the existing session');
+  assert.equal((await admin.put('/api/users/rolekid/role', { role: 'viewer' })).status, 200);
+  assert.equal((await u.get('/api/users')).status, 403);
+
+  assert.equal((await admin.put('/api/users/rolekid/role', { role: 'root' })).status, 400);
+  assert.equal((await admin.put('/api/users/admin/role', { role: 'viewer' })).status, 400, 'cannot demote yourself');
+  assert.equal((await admin.put('/api/users/ghost/role', { role: 'admin' })).status, 404);
+  assert.equal((await viewer.put('/api/users/rolekid/role', { role: 'admin' })).status, 403);
+  assert.equal((await u.put('/api/users/rolekid/role', { role: 'admin' })).status, 403, 'a viewer cannot self-promote');
 });

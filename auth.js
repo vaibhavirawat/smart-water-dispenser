@@ -67,9 +67,18 @@ const requireAdmin = (req, res, next) =>
   requireAuth(req, res, () =>
     req.user.role === 'admin' ? next() : res.status(403).json({ error: 'Admin access required' }));
 
-// tiny in-memory login throttle: 8 failures per IP per 10 minutes
-const fails = new Map();
-const throttled = ip => (fails.get(ip) || []).filter(t => Date.now() - t < 600e3).length >= 8;
-const recordFail = ip => fails.set(ip, [...(fails.get(ip) || []).filter(t => Date.now() - t < 600e3), Date.now()]);
+// tiny in-memory rate limiter: max N hits per key (IP) per window
+function makeLimiter(max, windowMs) {
+  const hits = new Map();
+  const recent = key => (hits.get(key) || []).filter(t => Date.now() - t < windowMs);
+  return {
+    blocked: key => recent(key).length >= max,
+    record: key => hits.set(key, [...recent(key), Date.now()]),
+  };
+}
+const loginLimiter = makeLimiter(8, 600e3);                                   // 8 failures / 10 min
+const signupLimiter = makeLimiter(+(process.env.SIGNUP_LIMIT || 5), 3600e3);  // 5 sign-ups / hour
+const throttled = ip => loginLimiter.blocked(ip);
+const recordFail = ip => loginLimiter.record(ip);
 
-module.exports = { setUserLookup, hashPassword, verifyPassword, setSession, clearSession, requireAuth, requireAdmin, readToken, cookieFrom, throttled, recordFail, COOKIE };
+module.exports = { makeLimiter, signupLimiter, setUserLookup, hashPassword, verifyPassword, setSession, clearSession, requireAuth, requireAdmin, readToken, cookieFrom, throttled, recordFail, COOKIE };

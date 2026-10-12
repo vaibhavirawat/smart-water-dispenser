@@ -285,10 +285,17 @@ async function loadUsers() {
   const users = await api('/users');
   $('#userList').innerHTML = users.map(u => `
     <li><span><b>${esc(u.username)}</b> <span class="badge ${u.role === 'admin' ? 'OK' : 'OFFLINE'}">${u.role}</span></span>
-    ${u.username === me.username ? '<span class="muted">you</span>' : `<button class="sm danger" data-del="${esc(u.username)}">Remove</button>`}</li>`).join('');
+    ${u.username === me.username ? '<span class="muted">you</span>' : `<span>
+      <button class="sm" data-role="${esc(u.username)}" data-to="${u.role === 'admin' ? 'viewer' : 'admin'}">Make ${u.role === 'admin' ? 'viewer' : 'admin'}</button>
+      <button class="sm danger" data-del="${esc(u.username)}">Remove</button></span>`}</li>`).join('');
 }
 $('#usersBtn').onclick = async () => { $('#userErr').textContent = ''; $('#usersDlg').showModal(); try { await loadUsers(); } catch (e) { $('#userErr').textContent = e.message; } };
 $('#userList').addEventListener('click', async e => {
+  if (e.target.dataset.role) {
+    try { await api(`/users/${encodeURIComponent(e.target.dataset.role)}/role`, 'PUT', { role: e.target.dataset.to }); loadUsers(); }
+    catch (err) { $('#userErr').textContent = err.message; }
+    return;
+  }
   const u = e.target.dataset.del; if (!u || !confirm(`Remove user ${u}?`)) return;
   try { await api('/users/' + encodeURIComponent(u), 'DELETE'); loadUsers(); } catch (err) { $('#userErr').textContent = err.message; }
 });

@@ -9,15 +9,15 @@ Node.js · Express · MySQL · HTML/CSS/JS
 A full-stack system for monitoring a fleet of smart water dispensers: devices report water level and temperature to a REST API backed by MySQL, and a live dashboard shows tank levels, usage trends and alerts.
 
 ## Features
-- **Animated login** with a water-wave scene, show/hide password, shake-on-error and "remember username"
+- **Animated login + self sign-up** (Sign in / Create account tabs, password-strength meter, confirm password, show/hide, shake-on-error). New sign-ups are always read-only viewers; set `ALLOW_SIGNUP=false` to turn sign-up off
 - **Live dashboard** (auto-refresh every 5 s) with animated water-tank gauges, count-up stats and a cards/table view
 - **Dark / light theme**, search (`/` to focus), status filter and sort (name, lowest level, needs attention, most used)
 - **Dispenser detail view**: 24-hour level history chart and recent dispenses
 - **Automatic alerts**: low level, empty, high temperature, device offline (deduplicated, auto-resolving)
 - **Role-based access**: admins manage dispensers and users; viewers get a read-only dashboard
-- **User management** and **change password** from the UI
+- **User management** (add, remove, promote/demote) and **change password** from the UI
 - **CSV export** of dispense history
-- Device simulator, ESP32 firmware, Docker Compose, 33 automated tests and CI
+- Device simulator, ESP32 firmware, Docker Compose, 39 automated tests and CI
 
 <details><summary>More screenshots</summary>
 <p><img src="docs/detail.png" alt="Dispenser detail" width="80%"></p>
@@ -52,7 +52,8 @@ Devices / simulator ──HTTP──▶ Express REST API ──▶ MySQL
 | GET | /api/stats, /api/usage/daily, /api/usage/hourly | dashboard data |
 | GET | /api/export/events.csv?days=30 | CSV download |
 | GET/POST/DELETE | /api/users (admin) | user management |
-| POST | /api/auth/login, /logout, /password · GET /api/auth/me | authentication |
+| POST | /api/auth/login, /register, /logout, /password · GET /api/auth/me, /config | authentication |
+| PUT | /api/users/:username/role (admin) | promote / demote |
 | GET | /api/alerts, POST /api/alerts/:id/resolve | alerts |
 | GET | /api/health | liveness + DB check |
 
@@ -61,7 +62,7 @@ Devices / simulator ──HTTP──▶ Express REST API ──▶ MySQL
 - Passwords hashed with scrypt + per-user salt; sessions are HMAC-signed HttpOnly, SameSite=Strict cookies (12 h).
 - Every request re-checks the user in the database, so removed users and role changes take effect immediately.
 - CSV export neutralises spreadsheet formula injection.
-- Login throttling (8 failed attempts / 10 min / IP). Devices use a separate shared `x-api-key`.
+- Login throttling (8 failed attempts / 10 min / IP); sign-ups limited to 5 / hour / IP (`SIGNUP_LIMIT`). Self-registration can never create an admin. Devices use a separate shared `x-api-key`.
 
 ## Reliability design
 - Connection pool, parameterized queries, input validation.
@@ -82,7 +83,7 @@ Open http://localhost:3000 and sign in with `ADMIN_USERNAME` / `ADMIN_PASSWORD` 
 ```bash
 npm test
 ```
-33 integration tests (Node's built-in test runner) run the real app against a throwaway `smart_water_test` database that is created and dropped automatically. They cover login and roles, forged cookies, input validation, dispense/refill logic, alert dedupe and auto-resolve, offline detection, device API-key auth, analytics, cascade deletes, and a concurrency test proving 20 simultaneous dispenses can never overdraw a 5 L tank.
+39 integration tests (Node's built-in test runner) run the real app against a throwaway `smart_water_test` database that is created and dropped automatically. They cover login and roles, forged cookies, input validation, dispense/refill logic, alert dedupe and auto-resolve, offline detection, device API-key auth, analytics, cascade deletes, and a concurrency test proving 20 simultaneous dispenses can never overdraw a 5 L tank.
 
 ## Real hardware (ESP32)
 `firmware/esp32_dispenser/` contains an Arduino sketch that reports real sensor data:
