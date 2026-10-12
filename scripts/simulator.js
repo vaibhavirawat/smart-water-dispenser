@@ -1,0 +1,23 @@
+// Simulates dispensers: random users draw water, devices send heartbeats.
+// Usage: npm run simulate   (server must be running)
+const BASE = process.env.API || 'http://localhost:3000/api';
+const j = (path, method = 'GET', body) =>
+  fetch(BASE + path, { method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) })
+    .then(async r => ({ ok: r.ok, data: r.status === 204 ? null : await r.json() }));
+
+(async () => {
+  console.log('Simulator running. Ctrl+C to stop.');
+  setInterval(async () => {
+    const { data: list } = await j('/dispensers');
+    for (const d of list) {
+      if (!d.enabled) continue;
+      const temp = +(d.temperature_c ?? 9) + (Math.random() - 0.5);
+      await j(`/dispensers/${d.id}/readings`, 'POST', { temperature_c: +temp.toFixed(1) });
+      if (Math.random() < 0.6) {
+        const ml = [250, 330, 500, 750][Math.floor(Math.random() * 4)];
+        const r = await j(`/dispensers/${d.id}/dispense`, 'POST', { volume_ml: ml });
+        console.log(r.ok ? `${d.name}: -${ml}ml` : `${d.name}: ${r.data.error}`);
+      }
+    }
+  }, 3000);
+})();

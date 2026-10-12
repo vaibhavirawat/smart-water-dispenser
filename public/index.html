@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Water Dispenser</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>💧 Smart Water Dispenser <span>Management</span></h1>
+  <div class="right">
+    <span id="conn" class="pill ok">● Live</span>
+    <span id="updated" class="muted"></span>
+    <button id="addBtn" class="primary">+ Add dispenser</button>
+  </div>
+</header>
+
+<main>
+  <section class="cards" id="cards"></section>
+
+  <section class="grid">
+    <div class="panel wide">
+      <div class="panel-head">
+        <h2>Dispensers</h2>
+        <select id="filter">
+          <option value="">All statuses</option>
+          <option>OK</option><option>LOW</option><option>EMPTY</option>
+          <option>OFFLINE</option><option>DISABLED</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Name</th><th>Location</th><th>Water level</th><th>Temp</th><th>Today</th><th>Status</th><th>Last seen</th><th></th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Open alerts</h2></div>
+      <ul id="alerts" class="alerts"></ul>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Usage – last 7 days (L)</h2></div>
+      <svg id="daily" class="chart" viewBox="0 0 400 180"></svg>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Usage today by hour (L)</h2></div>
+      <svg id="hourly" class="chart" viewBox="0 0 400 180"></svg>
+    </div>
+  </section>
+</main>
+
+<dialog id="dlg">
+  <form method="dialog" id="form">
+    <h3 id="dlgTitle">Add dispenser</h3>
+    <label>Name <input name="name" required maxlength="80"></label>
+    <label>Location <input name="location" required maxlength="120"></label>
+    <label>Capacity (L) <input name="capacity_l" type="number" min="1" step="0.1" value="20" required></label>
+    <label>Current level (L) <input name="level_l" type="number" min="0" step="0.1" value="0"></label>
+    <p id="formErr" class="err"></p>
+    <div class="actions">
+      <button type="button" id="cancel">Cancel</button>
+      <button type="submit" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>
