@@ -1,4 +1,6 @@
 # Smart Water Dispenser Management System
+
+[![CI](https://github.com/vaibhavirawat/smart-water-dispenser/actions/workflows/ci.yml/badge.svg)](https://github.com/vaibhavirawat/smart-water-dispenser/actions/workflows/ci.yml)
 Node.js · Express · MySQL · HTML/CSS/JS
 
 ![Dashboard](docs/dashboard.png)
