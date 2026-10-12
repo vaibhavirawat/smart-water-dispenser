@@ -22,6 +22,9 @@ const pool = mysql.createPool({
   dateStrings: false,
 });
 
+auth.setUserLookup(async username =>
+  (await pool.query('SELECT username, role FROM users WHERE username=?', [username]))[0][0]);
+
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10kb' }));
@@ -66,6 +69,11 @@ async function syncAlert(conn, dispenserId, type, active, message) {
   else if (!active && rows.length)
     await conn.query('UPDATE alerts SET resolved=1, resolved_at=NOW() WHERE id=?', [rows[0].id]);
 }
+
+// Append a point to the level history (powers the detail chart)
+const logLevel = (conn, d) =>
+  conn.query('INSERT INTO level_readings (dispenser_id, level_l, temperature_c) VALUES (?,?,?)',
+    [d.id, d.level_l, d.temperature_c]);
 
 async function evaluateAlerts(conn, d) {
   const pct = (d.level_l / d.capacity_l) * 100;
@@ -190,6 +198,7 @@ app.post('/api/dispensers/:id/readings', deviceAuth, wrap(async (req, res) => {
     await conn.query('UPDATE dispensers SET level_l=?, temperature_c=?, last_seen=NOW() WHERE id=?', [level, temp, d.id]);
     const updated = await getDispenser(conn, d.id);
     await evaluateAlerts(conn, updated);
+    await logLevel(conn, updated);
     return withStatus(updated);
   });
   res.json(out);
@@ -206,6 +215,7 @@ app.post('/api/dispensers/:id/dispense', deviceAuth, wrap(async (req, res) => {
     await conn.query('UPDATE dispensers SET level_l = level_l - ?, last_seen=NOW() WHERE id=?', [ml / 1000, d.id]);
     const updated = await getDispenser(conn, d.id);
     await evaluateAlerts(conn, updated);
+    await logLevel(conn, updated);
     return withStatus(updated);
   });
   res.json(out);
@@ -222,6 +232,7 @@ app.post('/api/dispensers/:id/refill', auth.requireAdmin, wrap(async (req, res) 
     await conn.query('UPDATE dispensers SET level_l=?, last_seen=NOW() WHERE id=?', [newLevel, d.id]);
     const updated = await getDispenser(conn, d.id);
     await evaluateAlerts(conn, updated);
+    await logLevel(conn, updated);
     return withStatus(updated);
   });
   res.json(out);
@@ -291,6 +302,79 @@ app.post('/api/alerts/:id/resolve', auth.requireAdmin, wrap(async (req, res) => 
   res.json({ ok: true });
 }));
 
+// ---------- level history + export ----------
+app.get('/api/dispensers/:id/history', auth.requireAuth, wrap(async (req, res) => {
+  const hours = Math.min(168, Math.max(1, +req.query.hours || 24));
+  const [rows] = await pool.query(
+    `SELECT level_l, temperature_c, created_at FROM level_readings
+     WHERE dispenser_id=? AND created_at >= NOW() - INTERVAL ? HOUR ORDER BY created_at LIMIT 1000`,
+    [req.params.id, hours]);
+  res.json(rows);
+}));
+
+const csvCell = v => {
+  let t = v instanceof Date ? v.toISOString() : String(v ?? '');
+  if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; // neutralise spreadsheet formula injection
+  return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+};
+app.get('/api/export/events.csv', auth.requireAuth, wrap(async (req, res) => {
+  const days = Math.min(365, Math.max(1, +req.query.days || 30));
+  const [rows] = await pool.query(
+    `SELECT e.id, d.name, d.location, e.volume_ml, e.created_at
+     FROM dispense_events e JOIN dispensers d ON d.id = e.dispenser_id
+     WHERE e.created_at >= NOW() - INTERVAL ? DAY ORDER BY e.created_at DESC`, [days]);
+  const lines = ['id,dispenser,location,volume_ml,time',
+    ...rows.map(r => [r.id, r.name, r.location, r.volume_ml, r.created_at].map(csvCell).join(','))];
+  res.set({ 'Content-Type': 'text/csv; charset=utf-8',
+    'Content-Disposition': `attachment; filename="dispense-events-${days}d.csv"` });
+  res.send(lines.join('\n') + '\n');
+}));
+
+// ---------- user management ----------
+const USERNAME_RE = /^[A-Za-z0-9_.-]{3,30}$/;
+const checkPassword = pw => {
+  if (typeof pw !== 'string' || pw.length < 8 || pw.length > 100)
+    throw new HttpError(400, 'Password must be 8-100 characters');
+  return pw;
+};
+
+app.get('/api/users', auth.requireAdmin, wrap(async (req, res) => {
+  const [rows] = await pool.query('SELECT username, role, created_at FROM users ORDER BY created_at, username');
+  res.json(rows);
+}));
+
+app.post('/api/users', auth.requireAdmin, wrap(async (req, res) => {
+  const { username, password, role } = req.body || {};
+  if (!USERNAME_RE.test(username || '')) throw new HttpError(400, 'Username must be 3-30 letters, numbers, . _ -');
+  if (!['admin', 'viewer'].includes(role)) throw new HttpError(400, 'Role must be admin or viewer');
+  checkPassword(password);
+  try {
+    await pool.query('INSERT INTO users (username, password_hash, role) VALUES (?,?,?)',
+      [username, auth.hashPassword(password), role]);
+  } catch (e) {
+    if (e.code === 'ER_DUP_ENTRY') throw new HttpError(409, 'That username already exists');
+    throw e;
+  }
+  res.status(201).json({ username, role });
+}));
+
+app.delete('/api/users/:username', auth.requireAdmin, wrap(async (req, res) => {
+  if (req.params.username === req.user.username) throw new HttpError(400, "You can't delete your own account");
+  const [r] = await pool.query('DELETE FROM users WHERE username=?', [req.params.username]);
+  if (!r.affectedRows) throw new HttpError(404, 'User not found');
+  res.status(204).end();
+}));
+
+app.post('/api/auth/password', auth.requireAuth, wrap(async (req, res) => {
+  const { current_password, new_password } = req.body || {};
+  checkPassword(new_password);
+  const [rows] = await pool.query('SELECT * FROM users WHERE username=?', [req.user.username]);
+  if (!rows[0] || typeof current_password !== 'string' || !auth.verifyPassword(current_password, rows[0].password_hash))
+    throw new HttpError(401, 'Current password is incorrect');
+  await pool.query('UPDATE users SET password_hash=? WHERE username=?', [auth.hashPassword(new_password), req.user.username]);
+  res.json({ ok: true });
+}));
+
 // ---------- errors ----------
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use((err, req, res, next) => {
@@ -304,6 +388,7 @@ app.use((err, req, res, next) => {
 async function checkOffline() {
   const conn = await pool.getConnection();
   try {
+    await conn.query('DELETE FROM level_readings WHERE created_at < NOW() - INTERVAL 30 DAY');
     const [rows] = await conn.query('SELECT * FROM dispensers WHERE enabled=1');
     for (const d of rows) {
       const stale = !d.last_seen || (Date.now() - new Date(d.last_seen).getTime()) / 60000 > OFFLINE_AFTER_MIN;

@@ -51,3 +51,13 @@ CREATE TABLE IF NOT EXISTS users (
   role          ENUM('admin','viewer') NOT NULL DEFAULT 'viewer',
   created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS level_readings (
+  id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+  dispenser_id  INT NOT NULL,
+  level_l       DECIMAL(6,2) NOT NULL,
+  temperature_c DECIMAL(4,1) NULL,
+  created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_disp_time (dispenser_id, created_at),
+  FOREIGN KEY (dispenser_id) REFERENCES dispensers(id) ON DELETE CASCADE
+) ENGINE=InnoDB;

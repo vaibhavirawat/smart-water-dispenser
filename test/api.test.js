@@ -277,3 +277,97 @@ test('deleting a dispenser cascades to its events and alerts', async () => {
     'SELECT (SELECT COUNT(*) FROM dispense_events WHERE dispenser_id=?) + (SELECT COUNT(*) FROM alerts WHERE dispenser_id=?) n', [d.id, d.id]);
   assert.equal(n, 0);
 });
+
+// ---------- level history ----------
+test('history records readings and requires login', async () => {
+  const d = await newDispenser(admin, { capacity_l: 10, level_l: 5 });
+  const dev = client();
+  await dev.post(`/api/dispensers/${d.id}/readings`, { level_l: 4 }, DEVICE);
+  await dev.post(`/api/dispensers/${d.id}/dispense`, { volume_ml: 500 }, DEVICE);
+  await admin.post(`/api/dispensers/${d.id}/refill`);
+  const h = (await viewer.get(`/api/dispensers/${d.id}/history?hours=24`)).body;
+  assert.deepEqual(h.map(p => p.level_l), [4, 3.5, 10]);
+  assert.equal((await client().get(`/api/dispensers/${d.id}/history`)).status, 401);
+});
+
+// ---------- CSV export ----------
+test('CSV export: auth required, correct headers, escapes formulas and commas', async () => {
+  const d = await newDispenser(admin, { name: '=HYPERLINK("x")', location: 'Hall, East', level_l: 5 });
+  await client().post(`/api/dispensers/${d.id}/dispense`, { volume_ml: 250 }, DEVICE);
+  assert.equal((await client().get('/api/export/events.csv')).status, 401);
+
+  const r = await fetch(base + '/api/export/events.csv?days=1', { headers: { Cookie: (await (async () => {
+    const c = client(); const res = await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'viewer', password: PW }) });
+    return res.headers.get('set-cookie').split(';')[0];
+  })()) } });
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get('content-type'), /text\/csv/);
+  assert.match(r.headers.get('content-disposition'), /attachment; filename="dispense-events-1d.csv"/);
+  const text = await r.text();
+  assert.ok(text.startsWith('id,dispenser,location,volume_ml,time\n'));
+  assert.ok(text.includes(`"'=HYPERLINK(""x"")"`), 'formula neutralised and quotes escaped');
+  assert.ok(text.includes('"Hall, East"'), 'comma cell quoted');
+});
+
+// ---------- user management ----------
+test('only admins can manage users', async () => {
+  assert.equal((await viewer.get('/api/users')).status, 403);
+  assert.equal((await viewer.post('/api/users', { username: 'x_user', password: 'longenough1', role: 'viewer' })).status, 403);
+  assert.equal((await viewer.del('/api/users/admin')).status, 403);
+  assert.equal((await client().get('/api/users')).status, 401);
+  const list = (await admin.get('/api/users')).body;
+  assert.ok(list.some(u => u.username === 'admin' && u.role === 'admin'));
+  assert.ok(list.every(u => !('password_hash' in u)), 'hashes never leave the server');
+});
+
+test('admin creates a user who can log in, then removes them', async () => {
+  const c = await admin.post('/api/users', { username: 'new.user-1', password: 'GoodPass123', role: 'viewer' });
+  assert.equal(c.status, 201);
+  assert.equal((await client().login('new.user-1', 'GoodPass123')).status, 200);
+  assert.equal((await admin.post('/api/users', { username: 'new.user-1', password: 'GoodPass123', role: 'viewer' })).status, 409);
+  assert.equal((await admin.del('/api/users/new.user-1')).status, 204);
+  assert.equal((await client().login('new.user-1', 'GoodPass123')).status, 401);
+  assert.equal((await admin.del('/api/users/new.user-1')).status, 404);
+});
+
+test('user creation validates username, role and password', async () => {
+  const bad = [
+    { username: 'ab', password: 'GoodPass123', role: 'viewer' },
+    { username: 'has space', password: 'GoodPass123', role: 'viewer' },
+    { username: 'bobby', password: 'short', role: 'viewer' },
+    { username: 'bobby', password: 'GoodPass123', role: 'superuser' },
+    { username: "x'; DROP TABLE users;--", password: 'GoodPass123', role: 'viewer' },
+  ];
+  for (const b of bad) assert.equal((await admin.post('/api/users', b)).status, 400, JSON.stringify(b));
+});
+
+test('admin cannot delete their own account', async () => {
+  assert.equal((await admin.del('/api/users/admin')).status, 400);
+});
+
+test('change password: verifies current, enforces length, old password stops working', async () => {
+  await admin.post('/api/users', { username: 'pw_user', password: 'OldPassword1', role: 'viewer' });
+  const u = client(); await u.login('pw_user', 'OldPassword1');
+  assert.equal((await u.post('/api/auth/password', { current_password: 'nope', new_password: 'NewPassword1' })).status, 401);
+  assert.equal((await u.post('/api/auth/password', { current_password: 'OldPassword1', new_password: 'short' })).status, 400);
+  assert.equal((await u.post('/api/auth/password', { current_password: 'OldPassword1', new_password: 'NewPassword1' })).status, 200);
+  assert.equal((await client().login('pw_user', 'OldPassword1')).status, 401);
+  assert.equal((await client().login('pw_user', 'NewPassword1')).status, 200);
+  assert.equal((await client().post('/api/auth/password', { current_password: 'a', new_password: 'NewPassword2' })).status, 401, 'needs login');
+});
+
+test('a removed user\'s existing session stops working immediately', async () => {
+  await admin.post('/api/users', { username: 'doomed', password: 'DoomedPass1', role: 'viewer' });
+  const u = client(); await u.login('doomed', 'DoomedPass1');
+  assert.equal((await u.get('/api/dispensers')).status, 200);
+  await admin.del('/api/users/doomed');
+  assert.equal((await u.get('/api/dispensers')).status, 401);
+});
+
+test('role changes in the database apply to existing sessions', async () => {
+  await admin.post('/api/users', { username: 'promo', password: 'PromoPass12', role: 'admin' });
+  const u = client(); await u.login('promo', 'PromoPass12');
+  assert.equal((await u.get('/api/users')).status, 200);
+  await pool.query("UPDATE users SET role='viewer' WHERE username='promo'");
+  assert.equal((await u.get('/api/users')).status, 403);
+});

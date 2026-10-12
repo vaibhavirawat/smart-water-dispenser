@@ -50,11 +50,18 @@ function setSession(res, user) {
 }
 const clearSession = res => res.setHeader('Set-Cookie', `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`);
 
-const requireAuth = (req, res, next) => {
-  const user = readToken(cookieFrom(req, COOKIE));
-  if (!user) return res.status(401).json({ error: 'Login required' });
-  req.user = user;
-  next();
+// The cookie is only a signed claim; confirm against the DB so removed users / role changes take effect immediately.
+let findUser = async () => null;
+const setUserLookup = fn => { findUser = fn; };
+
+const requireAuth = async (req, res, next) => {
+  try {
+    const claim = readToken(cookieFrom(req, COOKIE));
+    const row = claim && await findUser(claim.username);
+    if (!row) return res.status(401).json({ error: 'Login required' });
+    req.user = { username: row.username, role: row.role };
+    next();
+  } catch (e) { next(e); }
 };
 const requireAdmin = (req, res, next) =>
   requireAuth(req, res, () =>
@@ -65,4 +72,4 @@ const fails = new Map();
 const throttled = ip => (fails.get(ip) || []).filter(t => Date.now() - t < 600e3).length >= 8;
 const recordFail = ip => fails.set(ip, [...(fails.get(ip) || []).filter(t => Date.now() - t < 600e3), Date.now()]);
 
-module.exports = { hashPassword, verifyPassword, setSession, clearSession, requireAuth, requireAdmin, readToken, cookieFrom, throttled, recordFail, COOKIE };
+module.exports = { setUserLookup, hashPassword, verifyPassword, setSession, clearSession, requireAuth, requireAdmin, readToken, cookieFrom, throttled, recordFail, COOKIE };

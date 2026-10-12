@@ -4,39 +4,146 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in – Smart Water Dispenser</title>
-<link rel="stylesheet" href="style.css">
 <style>
-  body{display:grid;place-items:center;min-height:100vh}
-  .box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:28px;width:min(360px,92vw)}
-  .box h1{font-size:20px;margin-bottom:4px}
-  .box label{display:block;margin:14px 0 0;font-size:12px;color:var(--muted)}
-  .box input{display:block;width:100%;margin-top:4px}
-  .box button{width:100%;margin-top:18px;padding:9px}
+  :root{--blue:#1e88e5}
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{font:15px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;color:#fff;overflow:hidden;
+    background:linear-gradient(180deg,#0a2540 0%,#0d4f8b 55%,#1e88e5 100%);display:grid;place-items:center}
+
+  /* ---- animated water ---- */
+  .waves{position:fixed;left:0;right:0;bottom:0;height:34vh;pointer-events:none}
+  .wave{position:absolute;left:0;bottom:0;width:200%;height:100%;background-repeat:repeat-x;background-size:50% 100%;animation:drift linear infinite}
+  .wave.w1{opacity:.35;animation-duration:18s;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1200 200' preserveAspectRatio='none'%3E%3Cpath d='M0 90 C150 40 300 140 450 90 S750 40 900 90 S1100 130 1200 90 V200 H0Z' fill='%2364b5f6'/%3E%3C/svg%3E")}
+  .wave.w2{opacity:.45;animation-duration:12s;animation-direction:reverse;height:80%;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1200 200' preserveAspectRatio='none'%3E%3Cpath d='M0 100 C200 150 350 50 600 100 S1000 150 1200 100 V200 H0Z' fill='%2342a5f5'/%3E%3C/svg%3E")}
+  .wave.w3{opacity:.7;animation-duration:8s;height:55%;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1200 200' preserveAspectRatio='none'%3E%3Cpath d='M0 110 C150 70 300 150 600 110 S1050 70 1200 110 V200 H0Z' fill='%231e88e5'/%3E%3C/svg%3E")}
+  @keyframes drift{to{transform:translateX(-50%)}}
+
+  .bubbles span{position:fixed;bottom:-30px;border-radius:50%;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.35);
+    animation:rise linear infinite}
+  @keyframes rise{to{transform:translateY(-110vh) translateX(var(--dx,20px));opacity:0}}
+
+  /* ---- card ---- */
+  .card{position:relative;z-index:2;width:min(380px,92vw);padding:32px 30px 28px;border-radius:20px;
+    background:rgba(255,255,255,.12);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+    border:1px solid rgba(255,255,255,.28);box-shadow:0 20px 60px rgba(0,0,0,.35);animation:enter .7s cubic-bezier(.2,.8,.2,1) both}
+  @keyframes enter{from{opacity:0;transform:translateY(26px) scale(.97)}}
+  .card.shake{animation:shake .45s}
+  @keyframes shake{20%,60%{transform:translateX(-10px)}40%,80%{transform:translateX(10px)}}
+
+  .drop{width:58px;height:58px;margin:0 auto 10px;display:block;animation:bob 3s ease-in-out infinite;filter:drop-shadow(0 6px 10px rgba(0,0,0,.3))}
+  @keyframes bob{50%{transform:translateY(-6px)}}
+  h1{margin:0;text-align:center;font-size:22px}
+  .sub{text-align:center;opacity:.8;font-size:13px;margin:4px 0 22px}
+
+  .field{position:relative;margin-bottom:14px}
+  .field input{width:100%;padding:20px 14px 8px;border-radius:12px;border:1px solid rgba(255,255,255,.3);
+    background:rgba(255,255,255,.1);color:#fff;font:inherit;outline:none;transition:border-color .2s,background .2s,box-shadow .2s}
+  .field input:focus{border-color:#fff;background:rgba(255,255,255,.18);box-shadow:0 0 0 4px rgba(255,255,255,.12)}
+  .field label{position:absolute;left:14px;top:14px;font-size:14px;opacity:.75;pointer-events:none;transition:all .18s}
+  .field input:focus+label,.field input:not(:placeholder-shown)+label{top:6px;font-size:11px;opacity:.9}
+  .eye{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:0;color:#fff;opacity:.75;cursor:pointer;padding:8px;font-size:16px}
+  .eye:hover{opacity:1}
+
+  .row{display:flex;align-items:center;gap:8px;font-size:13px;opacity:.9;margin:2px 0 16px}
+  .row input{accent-color:#fff}
+
+  button.go{width:100%;padding:13px;border:0;border-radius:12px;background:#fff;color:#0d4f8b;font:inherit;font-weight:700;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;gap:10px;transition:transform .15s,box-shadow .15s}
+  button.go:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(0,0,0,.25)}
+  button.go:active{transform:none}
+  button.go:disabled{opacity:.8;cursor:wait;transform:none}
+  .spin{width:16px;height:16px;border:2.5px solid #0d4f8b44;border-top-color:#0d4f8b;border-radius:50%;animation:rot .7s linear infinite;display:none}
+  .loading .spin{display:block}
+  @keyframes rot{to{transform:rotate(360deg)}}
+
+  .err{min-height:20px;margin:0 0 10px;font-size:13px;color:#ffd0d0;text-align:center}
+  .foot{margin-top:18px;text-align:center;font-size:12px;opacity:.6}
+
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
-<form class="box" id="f">
-  <h1>💧 Smart Water Dispenser</h1>
-  <div class="muted">Sign in to continue</div>
-  <label>Username <input name="username" autocomplete="username" required autofocus></label>
-  <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
-  <p class="err" id="err"></p>
-  <button class="primary" type="submit">Sign in</button>
+<div class="bubbles" id="bubbles" aria-hidden="true"></div>
+<div class="waves" aria-hidden="true"><div class="wave w1"></div><div class="wave w2"></div><div class="wave w3"></div></div>
+
+<form class="card" id="card" novalidate>
+  <svg class="drop" viewBox="0 0 64 64" aria-hidden="true">
+    <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#bbdefb"/><stop offset="1" stop-color="#2196f3"/></linearGradient></defs>
+    <path d="M32 4C32 4 12 26 12 40a20 20 0 0 0 40 0C52 26 32 4 32 4Z" fill="url(#g)"/>
+    <path d="M22 40a10 10 0 0 0 8 10" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" opacity=".7"/>
+  </svg>
+  <h1>Smart Water Dispenser</h1>
+  <div class="sub">Sign in to your dashboard</div>
+
+  <div class="field">
+    <input id="u" name="username" placeholder=" " autocomplete="username" autocapitalize="none" spellcheck="false" required>
+    <label for="u">Username</label>
+  </div>
+  <div class="field">
+    <input id="p" name="password" type="password" placeholder=" " autocomplete="current-password" required>
+    <label for="p">Password</label>
+    <button type="button" class="eye" id="eye" aria-label="Show password" title="Show / hide password">👁</button>
+  </div>
+
+  <div class="row"><input type="checkbox" id="rem"><label for="rem">Remember my username</label></div>
+  <p class="err" id="err" role="alert"></p>
+  <button class="go" id="go" type="submit"><span class="spin"></span><span id="goText">Sign in</span></button>
+  <div class="foot">Contact an administrator if you need an account.</div>
 </form>
+
 <script>
-document.getElementById('f').addEventListener('submit', async e => {
+const $ = id => document.getElementById(id);
+const card = $('card'), err = $('err'), go = $('go');
+
+// bubbles
+for (let i = 0; i < 16; i++) {
+  const b = document.createElement('span'), s = 6 + Math.random() * 22;
+  b.style.cssText = `left:${Math.random() * 100}%;width:${s}px;height:${s}px;animation-duration:${8 + Math.random() * 12}s;animation-delay:${-Math.random() * 15}s;--dx:${(Math.random() - .5) * 80}px`;
+  $('bubbles').appendChild(b);
+}
+
+try { const u = localStorage.getItem('swd_user'); if (u) { $('u').value = u; $('rem').checked = true; $('p').focus(); } } catch {}
+
+// already signed in? skip the form
+fetch('/api/auth/me').then(r => { if (r.ok) location.replace('/'); }).catch(() => {});
+
+$('eye').onclick = () => {
+  const show = $('p').type === 'password';
+  $('p').type = show ? 'text' : 'password';
+  $('eye').textContent = show ? '🙈' : '👁';
+  $('eye').setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+};
+
+function fail(msg) {
+  err.textContent = msg;
+  card.classList.remove('shake'); void card.offsetWidth; card.classList.add('shake');
+}
+
+card.addEventListener('submit', async e => {
   e.preventDefault();
-  const f = e.target, err = document.getElementById('err');
   err.textContent = '';
+  if (!$('u').value.trim() || !$('p').value) return fail('Enter your username and password');
+  go.disabled = true; go.classList.add('loading'); $('goText').textContent = 'Signing in…';
   try {
     const r = await fetch('/api/auth/login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: f.username.value, password: f.password.value }),
+      body: JSON.stringify({ username: $('u').value.trim(), password: $('p').value }),
     });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.error || 'Login failed');
-    location.href = '/';
-  } catch (x) { err.textContent = x.message; }
+    try { $('rem').checked ? localStorage.setItem('swd_user', $('u').value.trim()) : localStorage.removeItem('swd_user'); } catch {}
+    $('goText').textContent = 'Welcome ✓';
+    card.style.transition = 'opacity .35s, transform .35s'; card.style.opacity = 0; card.style.transform = 'translateY(-14px) scale(.97)';
+    setTimeout(() => location.href = '/', 320);
+  } catch (x) {
+    fail(x.message === 'Failed to fetch' ? 'Cannot reach the server' : x.message);
+    $('p').select();
+    go.disabled = false; go.classList.remove('loading'); $('goText').textContent = 'Sign in';
+  }
 });
 </script>
 </body>

@@ -3,15 +3,26 @@
 [![CI](https://github.com/vaibhavirawat/smart-water-dispenser/actions/workflows/ci.yml/badge.svg)](https://github.com/vaibhavirawat/smart-water-dispenser/actions/workflows/ci.yml)
 Node.js · Express · MySQL · HTML/CSS/JS
 
-![Dashboard](docs/dashboard.png)
+<p align="center"><img src="docs/login.png" alt="Animated login page" width="85%"></p>
+<p align="center"><img src="docs/dashboard-dark.png" alt="Dashboard (dark theme)" width="85%"></p>
 
 A full-stack system for monitoring a fleet of smart water dispensers: devices report water level and temperature to a REST API backed by MySQL, and a live dashboard shows tank levels, usage trends and alerts.
 
 ## Features
-- Real-time dashboard (auto-refresh every 5 s) with status cards, per-dispenser level bars and usage charts
-- Automatic alerts: low level, empty, high temperature, device offline
-- Add / edit / disable / delete dispensers, refill, resolve alerts
-- Device simulator for demos and testing
+- **Animated login** with a water-wave scene, show/hide password, shake-on-error and "remember username"
+- **Live dashboard** (auto-refresh every 5 s) with animated water-tank gauges, count-up stats and a cards/table view
+- **Dark / light theme**, search (`/` to focus), status filter and sort (name, lowest level, needs attention, most used)
+- **Dispenser detail view**: 24-hour level history chart and recent dispenses
+- **Automatic alerts**: low level, empty, high temperature, device offline (deduplicated, auto-resolving)
+- **Role-based access**: admins manage dispensers and users; viewers get a read-only dashboard
+- **User management** and **change password** from the UI
+- **CSV export** of dispense history
+- Device simulator, ESP32 firmware, Docker Compose, 33 automated tests and CI
+
+<details><summary>More screenshots</summary>
+<p><img src="docs/detail.png" alt="Dispenser detail" width="80%"></p>
+<p><img src="docs/dashboard-light.png" alt="Dashboard (light theme)" width="80%"></p>
+</details>
 
 ## Architecture
 ```
@@ -26,7 +37,7 @@ Devices / simulator ──HTTP──▶ Express REST API ──▶ MySQL
 3. `cp .env.example .env` (first time only), then `npm run db:init`  (creates schema + sample data)
 4. Create a login: `npm run create-user -- admin admin` (prints a random password once; add a third argument to choose your own). Use role `viewer` for read-only users.
 5. `npm start` → http://localhost:3000
-6. Optional: `npm run simulate` for live fake traffic.
+6. Optional live demo traffic: `SIM_USER=admin SIM_PASSWORD=yourpassword npm run simulate`
 
 ## REST API
 | Method | Path | Purpose |
@@ -37,13 +48,19 @@ Devices / simulator ──HTTP──▶ Express REST API ──▶ MySQL
 | POST | /api/dispensers/:id/dispense | log a draw `{volume_ml}` (atomic) |
 | POST | /api/dispensers/:id/refill | refill `{added_l?}` |
 | GET | /api/dispensers/:id/events | recent dispenses |
+| GET | /api/dispensers/:id/history?hours=24 | level history for the detail chart |
 | GET | /api/stats, /api/usage/daily, /api/usage/hourly | dashboard data |
+| GET | /api/export/events.csv?days=30 | CSV download |
+| GET/POST/DELETE | /api/users (admin) | user management |
+| POST | /api/auth/login, /logout, /password · GET /api/auth/me | authentication |
 | GET | /api/alerts, POST /api/alerts/:id/resolve | alerts |
 | GET | /api/health | liveness + DB check |
 
 ## Security
 - Dashboard login with `admin` (full control) and `viewer` (read-only) roles; the API enforces roles, not just the UI.
 - Passwords hashed with scrypt + per-user salt; sessions are HMAC-signed HttpOnly, SameSite=Strict cookies (12 h).
+- Every request re-checks the user in the database, so removed users and role changes take effect immediately.
+- CSV export neutralises spreadsheet formula injection.
 - Login throttling (8 failed attempts / 10 min / IP). Devices use a separate shared `x-api-key`.
 
 ## Reliability design
@@ -65,7 +82,7 @@ Open http://localhost:3000 and sign in with `ADMIN_USERNAME` / `ADMIN_PASSWORD` 
 ```bash
 npm test
 ```
-24 integration tests (Node's built-in test runner) run the real app against a throwaway `smart_water_test` database that is created and dropped automatically. They cover login and roles, forged cookies, input validation, dispense/refill logic, alert dedupe and auto-resolve, offline detection, device API-key auth, analytics, cascade deletes, and a concurrency test proving 20 simultaneous dispenses can never overdraw a 5 L tank.
+33 integration tests (Node's built-in test runner) run the real app against a throwaway `smart_water_test` database that is created and dropped automatically. They cover login and roles, forged cookies, input validation, dispense/refill logic, alert dedupe and auto-resolve, offline detection, device API-key auth, analytics, cascade deletes, and a concurrency test proving 20 simultaneous dispenses can never overdraw a 5 L tank.
 
 ## Real hardware (ESP32)
 `firmware/esp32_dispenser/` contains an Arduino sketch that reports real sensor data:

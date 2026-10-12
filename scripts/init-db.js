@@ -39,14 +39,37 @@ const { hashPassword } = require('../auth');
         for (let i = 0; i < count; i++) {
           const hour = 7 + Math.floor(Math.random() * 13);
           const min = Math.floor(Math.random() * 60);
-          rows.push([r.insertId, [250, 330, 500, 750][Math.floor(Math.random() * 4)],
-            new Date(Date.now() - d * 864e5 - (new Date().getHours() - hour) * 36e5 - min * 6e4)]);
+          const when = new Date(); when.setDate(when.getDate() - d); when.setHours(hour, min, 0, 0);
+          if (when <= new Date()) // never create events in the future
+            rows.push([r.insertId, [250, 330, 500, 750][Math.floor(Math.random() * 4)], when]);
         }
       }
       await conn.query('INSERT INTO dispense_events (dispenser_id, volume_ml, created_at) VALUES ?', [rows]);
     }
     console.log(`Seeded ${seed.length} dispensers.`);
   }
+  // Demo level history (last 24 h, every 15 min) so charts aren't empty
+  const [[{ h }]] = await conn.query('SELECT COUNT(*) h FROM level_readings');
+  if (h === 0) {
+    const [ds] = await conn.query('SELECT id, capacity_l, level_l, temperature_c FROM dispensers');
+    const rows = [];
+    for (const d of ds) {
+      let level = Math.min(d.capacity_l, Number(d.level_l) + 6 + Math.random() * 4); // walk forward to "now"
+      const pts = [];
+      for (let i = 0; i < 96; i++) {
+        level -= Math.random() * 0.15;
+        if (level < d.capacity_l * 0.12) level = d.capacity_l * (0.85 + Math.random() * 0.1); // refilled
+        pts.push(level);
+      }
+      pts.reverse(); // oldest first; scale so the newest point lands on the current level
+      const shift = Number(d.level_l) - pts[pts.length - 1];
+      pts.forEach((v, i) => rows.push([d.id, Math.max(0, Math.min(d.capacity_l, v + shift * (i / 95))).toFixed(2),
+        (Number(d.temperature_c ?? 9) + Math.sin(i / 8) * 0.8).toFixed(1), new Date(Date.now() - (95 - i) * 15 * 6e4)]));
+    }
+    if (rows.length) await conn.query('INSERT INTO level_readings (dispenser_id, level_l, temperature_c, created_at) VALUES ?', [rows]);
+    console.log('Seeded level history.');
+  }
+
   // Optional first admin from env (used by Docker): only if there are no users yet.
   const [[{ u }]] = await conn.query('SELECT COUNT(*) u FROM users');
   if (u === 0 && process.env.ADMIN_PASSWORD) {
