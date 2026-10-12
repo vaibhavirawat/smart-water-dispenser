@@ -52,6 +52,13 @@ Devices / simulator ──HTTP──▶ Express REST API ──▶ MySQL
 - Dashboard polls every 5s, keeps last good data, and shows a Disconnected pill on failure.
 - Graceful shutdown on SIGINT/SIGTERM.
 
+## Run with Docker (one command)
+```bash
+cp .env.docker.example .env.docker     # then edit the passwords/secret
+docker compose --env-file .env.docker up --build
+```
+Open http://localhost:3000 and sign in with `ADMIN_USERNAME` / `ADMIN_PASSWORD` from `.env.docker`. Compose starts MySQL, waits for it to be healthy, creates the schema, sample data and the first admin, then starts the app. Data persists in a Docker volume; `docker compose down -v` wipes it. The database port is not exposed to the host.
+
 ## Tests
 ```bash
 npm test

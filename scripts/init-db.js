@@ -3,6 +3,7 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
+const { hashPassword } = require('../auth');
 
 (async () => {
   const conn = await mysql.createConnection({
@@ -12,8 +13,11 @@ const mysql = require('mysql2/promise');
     password: process.env.DB_PASSWORD || '',
     multipleStatements: true,
   });
-  await conn.query(fs.readFileSync(path.join(__dirname, '../db/schema.sql'), 'utf8'));
-  await conn.query(`USE \`${process.env.DB_NAME || 'smart_water'}\``);
+  const dbName = process.env.DB_NAME || 'smart_water';
+  if (!/^\w+$/.test(dbName)) throw new Error('DB_NAME may only contain letters, numbers and underscores');
+  const schema = fs.readFileSync(path.join(__dirname, '../db/schema.sql'), 'utf8').replace(/\bsmart_water\b/g, dbName);
+  await conn.query(schema);
+  await conn.query(`USE \`${dbName}\``);
 
   const [[{ n }]] = await conn.query('SELECT COUNT(*) n FROM dispensers');
   if (n === 0) {
@@ -42,6 +46,14 @@ const mysql = require('mysql2/promise');
       await conn.query('INSERT INTO dispense_events (dispenser_id, volume_ml, created_at) VALUES ?', [rows]);
     }
     console.log(`Seeded ${seed.length} dispensers.`);
+  }
+  // Optional first admin from env (used by Docker): only if there are no users yet.
+  const [[{ u }]] = await conn.query('SELECT COUNT(*) u FROM users');
+  if (u === 0 && process.env.ADMIN_PASSWORD) {
+    if (process.env.ADMIN_PASSWORD.length < 8) throw new Error('ADMIN_PASSWORD must be at least 8 characters');
+    await conn.query('INSERT INTO users (username, password_hash, role) VALUES (?,?,?)',
+      [process.env.ADMIN_USERNAME || 'admin', hashPassword(process.env.ADMIN_PASSWORD), 'admin']);
+    console.log(`Created admin user "${process.env.ADMIN_USERNAME || 'admin'}".`);
   }
   console.log('Database ready.');
   await conn.end();
