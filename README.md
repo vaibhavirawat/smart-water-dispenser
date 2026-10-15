@@ -10,7 +10,7 @@ Node.js · Express · MySQL · HTML/CSS/JS
 - **Try it:** open the link, choose **Create account** and sign up with any username and password. New accounts are always **read-only viewers**, so you can explore the dashboard, charts and detail views but can't change anything.
 - **Animated data:** the sample dispensers show **OFFLINE** unless a device or the simulator is reporting in. If you see that, the demo is simply idle, and it will come to life when the simulator runs (`npm run simulate`).
 - **Hosting note:** it runs on a small hosted plan, so it may be slow to respond after a quiet period or unavailable if the hosting credit runs out. Screenshots below show the full app.
-- Want to see the admin side (adding dispensers, managing users)? Run it locally (see **Run**) or ask me for a walkthrough.
+- Want to see the admin side (adding dispensers, managing users)? Run it locally .
 
 <p align="center"><img src="docs/login.png" alt="Animated login page" width="85%"></p>
 <p align="center"><img src="docs/dashboard-dark.png" alt="Dashboard (dark theme)" width="85%"></p>
