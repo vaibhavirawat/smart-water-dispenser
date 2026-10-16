@@ -34,6 +34,15 @@ const { dbConfig } = require('../db-config');
     console.log('Migrated: added users.email');
   }
 
+  // migration: per-dispenser alert thresholds
+  for (const [col, ddl] of [['low_level_pct', 'TINYINT UNSIGNED NULL AFTER enabled'], ['high_temp_c', 'DECIMAL(4,1) NULL AFTER low_level_pct']]) {
+    const [found] = await conn.query('SHOW COLUMNS FROM dispensers LIKE ?', [col]);
+    if (!found.length) {
+      await conn.query(`ALTER TABLE dispensers ADD COLUMN ${col} ${ddl}`);
+      console.log(`Migrated: added dispensers.${col}`);
+    }
+  }
+
   const [[{ n }]] = await conn.query('SELECT COUNT(*) n FROM dispensers');
   if (n === 0 && process.env.SEED_DEMO !== 'false') { // set SEED_DEMO=false in production to start empty
     const seed = [

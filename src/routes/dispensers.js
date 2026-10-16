@@ -20,8 +20,16 @@ const deviceAuth = (req, res, next) => {
 r.get('/api/dispensers', auth.requireAuth, wrap(async (req, res) => res.json(await listDispensers())));
 
 r.get('/api/dispensers/:id', auth.requireAuth, wrap(async (req, res) => {
-  res.json(withStatus(await getDispenser(pool, req.params.id)));
+  res.json((await listDispensers(req.params.id))[0]);
 }));
+
+// Optional per-dispenser alert thresholds: null/absent means "use the server default".
+const threshold = (v, name, min, max, int) => {
+  if (v === null || v === '') return null;
+  const n = num(v, name, { min, max });
+  if (int && !Number.isInteger(n)) throw new HttpError(400, `${name} must be a whole number`);
+  return n;
+};
 
 r.post('/api/dispensers', auth.requireAdmin, wrap(async (req, res) => {
   const b = req.body || {};
@@ -29,10 +37,12 @@ r.post('/api/dispensers', auth.requireAdmin, wrap(async (req, res) => {
   const location = str(b.location, 'location', 120);
   const capacity = num(b.capacity_l ?? 20, 'capacity_l', { min: 1, max: 1000 });
   const level = num(b.level_l ?? 0, 'level_l', { min: 0, max: capacity });
+  const lowPct = b.low_level_pct === undefined ? null : threshold(b.low_level_pct, 'low_level_pct', 1, 99, true);
+  const hotC = b.high_temp_c === undefined ? null : threshold(b.high_temp_c, 'high_temp_c', 0, 100, false);
   const [r] = await pool.query(
-    'INSERT INTO dispensers (name, location, capacity_l, level_l, last_seen) VALUES (?,?,?,?,NOW())',
-    [name, location, capacity, level]);
-  res.status(201).json(withStatus(await getDispenser(pool, r.insertId)));
+    'INSERT INTO dispensers (name, location, capacity_l, level_l, low_level_pct, high_temp_c, last_seen) VALUES (?,?,?,?,?,?,NOW())',
+    [name, location, capacity, level, lowPct, hotC]);
+  res.status(201).json((await listDispensers(r.insertId))[0]);
 }));
 
 r.put('/api/dispensers/:id', auth.requireAdmin, wrap(async (req, res) => {
@@ -43,12 +53,15 @@ r.put('/api/dispensers/:id', auth.requireAdmin, wrap(async (req, res) => {
     const location = b.location !== undefined ? str(b.location, 'location', 120) : d.location;
     const capacity = b.capacity_l !== undefined ? num(b.capacity_l, 'capacity_l', { min: 1, max: 1000 }) : d.capacity_l;
     const enabled = b.enabled !== undefined ? (b.enabled ? 1 : 0) : d.enabled;
+    const lowPct = b.low_level_pct !== undefined ? threshold(b.low_level_pct, 'low_level_pct', 1, 99, true) : d.low_level_pct;
+    const hotC = b.high_temp_c !== undefined ? threshold(b.high_temp_c, 'high_temp_c', 0, 100, false) : d.high_temp_c;
     if (d.level_l > capacity) throw new HttpError(400, 'capacity_l cannot be below the current level');
-    await conn.query('UPDATE dispensers SET name=?, location=?, capacity_l=?, enabled=? WHERE id=?',
-      [name, location, capacity, enabled, d.id]);
-    return withStatus(await getDispenser(conn, d.id));
+    await conn.query('UPDATE dispensers SET name=?, location=?, capacity_l=?, enabled=?, low_level_pct=?, high_temp_c=? WHERE id=?',
+      [name, location, capacity, enabled, lowPct, hotC, d.id]);
+    await evaluateAlerts(conn, await getDispenser(conn, d.id)); // a new threshold can open or clear an alert immediately
+    return d.id;
   });
-  res.json(out);
+  res.json((await listDispensers(out))[0]);
 }));
 
 r.delete('/api/dispensers/:id', auth.requireAdmin, wrap(async (req, res) => {
@@ -109,13 +122,22 @@ r.post('/api/dispensers/:id/refill', auth.requireAdmin, wrap(async (req, res) =>
 }));
 
 r.get('/api/dispensers/:id/events', auth.requireAuth, wrap(async (req, res) => {
+  await getDispenser(pool, req.params.id);
   const [rows] = await pool.query(
     'SELECT id, volume_ml, created_at FROM dispense_events WHERE dispenser_id=? ORDER BY created_at DESC LIMIT 50',
     [req.params.id]);
   res.json(rows);
 }));
 
+r.get('/api/dispensers/:id/refills', auth.requireAuth, wrap(async (req, res) => {
+  await getDispenser(pool, req.params.id);
+  const [rows] = await pool.query(
+    'SELECT id, added_l, created_at FROM refills WHERE dispenser_id=? ORDER BY created_at DESC, id DESC LIMIT 20', [req.params.id]);
+  res.json(rows);
+}));
+
 r.get('/api/dispensers/:id/history', auth.requireAuth, wrap(async (req, res) => {
+  await getDispenser(pool, req.params.id);
   const hours = Math.min(168, Math.max(1, +req.query.hours || 24));
   const [rows] = await pool.query(
     `SELECT level_l, temperature_c, created_at FROM level_readings

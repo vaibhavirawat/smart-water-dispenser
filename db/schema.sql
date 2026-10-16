@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS dispensers (
   level_l       DECIMAL(6,2) NOT NULL DEFAULT 0.00,
   temperature_c DECIMAL(4,1) NULL,
   enabled       TINYINT(1)   NOT NULL DEFAULT 1,
+  low_level_pct TINYINT UNSIGNED NULL,   -- per-dispenser LOW threshold (%); NULL = server default
+  high_temp_c   DECIMAL(4,1) NULL,       -- per-dispenser HIGH_TEMP threshold; NULL = server default
   last_seen     DATETIME     NULL,
   created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT chk_level CHECK (level_l >= 0 AND level_l <= capacity_l)
