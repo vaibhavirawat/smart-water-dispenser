@@ -22,17 +22,31 @@ A full-stack system for monitoring a fleet of smart water dispensers: devices re
 - **Live dashboard** (auto-refresh every 5 s) with animated water-tank gauges, count-up stats and a cards/table view
 - **Dark / light theme**, search (`/` to focus), status filter and sort (name, lowest level, needs attention, most used)
 - **Dispenser detail view**: 24-hour level history chart and recent dispenses
-- **Automatic alerts**: low level, empty, high temperature, device offline (deduplicated, auto-resolving)
+- **Automatic alerts**: low level, empty, high temperature, device offline (deduplicated, auto-resolving), with **per-dispenser thresholds** and a **resolved-alerts history**
+- **Email alerts** to administrators the moment a new alert opens (30-minute cooldown per dispenser and type; set `ALERT_EMAILS=false` to turn off)
+- **Time-to-empty forecast** on every dispenser, from the last 24 hours of usage
+- **Accessible and responsive**: keyboard navigation, screen-reader labels, skip link, reduced-motion support, phone layout, loading skeletons
 - **Role-based access**: admins manage dispensers and users; viewers get a read-only dashboard
 - **Forgot password**: single-use, 1-hour reset links (hashed in the database); changing or resetting a password signs out all other sessions
 - **User management** (add, remove, promote/demote) and **change password** from the UI
 - **CSV export** of dispense history
-- Device simulator, ESP32 firmware, Docker Compose, 51 automated tests and CI
+- Device simulator, ESP32 firmware, Docker Compose, 61 automated tests, ESLint and CI (Node 20 and 22)
 
 <details><summary>More screenshots</summary>
 <p><img src="docs/detail.png" alt="Dispenser detail" width="80%"></p>
 <p><img src="docs/dashboard-light.png" alt="Dashboard (light theme)" width="80%"></p>
 </details>
+
+## Project layout
+```
+server.js            app wiring: security headers, static files, routers, background job
+src/config.js        environment settings        src/db.js    MySQL pool + transactions
+src/http.js          errors, validation helpers  auth.js      scrypt hashing, signed sessions
+src/routes/          auth, users, dispensers (+ device API), analytics
+src/services/        dispenser status/forecast, alerts, email notifications, analytics queries
+public/              dashboard (app.js, style.css) and login page, no inline scripts
+test/                helpers.js + accounts, dispensers, features, recovery tests
+```
 
 ## Architecture
 ```
@@ -59,7 +73,9 @@ Devices / simulator ──HTTP──▶ Express REST API ──▶ MySQL
 | POST | /api/dispensers/:id/refill | refill `{added_l?}` |
 | GET | /api/dispensers/:id/events | recent dispenses |
 | GET | /api/dispensers/:id/history?hours=24 | level history for the detail chart |
-| GET | /api/stats, /api/usage/daily, /api/usage/hourly | dashboard data |
+| GET | /api/dashboard | stats, dispensers, alerts and usage charts in one call (what the UI polls) |
+| GET | /api/stats, /api/usage/daily, /api/usage/hourly | the same data as separate endpoints |
+| GET | /api/dispensers/:id/refills | recent refills |
 | GET | /api/export/events.csv?days=30 | CSV download |
 | GET/POST/DELETE | /api/users (admin) | user management |
 | POST | /api/auth/login, /register, /logout, /password · GET /api/auth/me, /config | authentication |
@@ -94,11 +110,12 @@ Open http://localhost:3000 and sign in with `ADMIN_USERNAME` / `ADMIN_PASSWORD` 
 ## Deploy
 See [DEPLOY.md](DEPLOY.md) for putting it online with HTTPS (Railway + managed MySQL), email setup for password reset and a security checklist.
 
-## Tests
+## Tests and linting
 ```bash
-npm test
+npm test        # 61 integration tests
+npm run lint    # ESLint
 ```
-51 integration tests (Node's built-in test runner) run the real app against a throwaway `smart_water_test` database that is created and dropped automatically. They cover login and roles, forged cookies, input validation, dispense/refill logic, alert dedupe and auto-resolve, offline detection, device API-key auth, analytics, cascade deletes, and a concurrency test proving 20 simultaneous dispenses can never overdraw a 5 L tank.
+The integration tests (Node's built-in test runner, one file per area in `test/`) run the real app against throwaway `smart_water_test_<area>` databases that are created and dropped automatically, so they run in parallel and never touch your data. They cover login and roles, forged cookies, input validation, dispense/refill logic, alert dedupe and auto-resolve, offline detection, device API-key auth, analytics, cascade deletes, and a concurrency test proving 20 simultaneous dispenses can never overdraw a 5 L tank.
 
 ## Real hardware (ESP32)
 `firmware/esp32_dispenser/` contains an Arduino sketch that reports real sensor data:
