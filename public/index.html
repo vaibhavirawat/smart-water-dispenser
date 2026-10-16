@@ -4,11 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Smart Water Dispenser</title>
-<script>
-  // set theme before first paint to avoid a flash
-  try { document.documentElement.dataset.theme = localStorage.getItem('swd_theme') ||
-    (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); } catch { document.documentElement.dataset.theme = 'light'; }
-</script>
+<script src="theme.js"></script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>

@@ -582,3 +582,20 @@ test('db-config understands URLs and hosted-provider variables', () => {
     Object.assign(process.env, keep);
   }
 });
+
+test('CSP forbids inline scripts and pages ship no inline script', async () => {
+  const r = await fetch(base + '/login.html');
+  const csp = r.headers.get('content-security-policy');
+  assert.match(csp, /script-src 'self';/);
+  for (const page of ['/login.html', '/']) {
+    const html = await (await fetch(base + page)).text();
+    assert.doesNotMatch(html, /<script>/, page);
+  }
+});
+
+test('device key check rejects wrong keys of any length', async () => {
+  const a = await admin.post('/api/dispensers', { name: 'K', location: 'x', capacity_l: 10, level_l: 5 });
+  for (const key of ['', 'x', 'test-device-key-and-more', 'a'.repeat(500)])
+    assert.equal((await client().post(`/api/dispensers/${a.body.id}/readings`, { level_l: 4 }, { 'x-api-key': key })).status, 401);
+  assert.equal((await client().post(`/api/dispensers/${a.body.id}/readings`, { level_l: 4 }, DEVICE)).status, 200);
+});

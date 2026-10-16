@@ -34,7 +34,7 @@ app.use((req, res, next) => {
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
     'Referrer-Policy': 'no-referrer',
-    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+    'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
     ...(process.env.COOKIE_SECURE === 'true' && { 'Strict-Transport-Security': 'max-age=15552000; includeSubDomains' }),
   });
   next();
@@ -121,9 +121,15 @@ async function getDispenser(conn, id, lock = false) {
 }
 
 // Devices authenticate with a shared key (header x-api-key). Disabled if DEVICE_API_KEY is unset.
+if (!process.env.DEVICE_API_KEY && process.env.NODE_ENV === 'production')
+  console.warn('WARNING: DEVICE_API_KEY is not set, so anyone can post readings and dispense events. Set it in production.');
+const sameKey = (a, b) => {
+  const ha = crypto.createHash('sha256').update(String(a)).digest(), hb = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(ha, hb); // hashing first makes the comparison constant-time regardless of length
+};
 const deviceAuth = (req, res, next) => {
   const key = process.env.DEVICE_API_KEY;
-  if (key && req.get('x-api-key') !== key) return res.status(401).json({ error: 'Invalid or missing API key' });
+  if (key && !sameKey(req.get('x-api-key') ?? '', key)) return res.status(401).json({ error: 'Invalid or missing API key' });
   next();
 };
 
@@ -493,10 +499,14 @@ app.use((err, req, res, next) => {
 });
 
 // ---------- background job: offline detection ----------
+let lastPrune = 0;
 async function checkOffline() {
   const conn = await pool.getConnection();
   try {
-    await conn.query('DELETE FROM level_readings WHERE created_at < NOW() - INTERVAL 30 DAY');
+    if (Date.now() - lastPrune > 3600e3) { // retention cleanup is hourly, not every 30 s
+      await conn.query('DELETE FROM level_readings WHERE created_at < NOW() - INTERVAL 30 DAY');
+      lastPrune = Date.now();
+    }
     const [rows] = await conn.query('SELECT * FROM dispensers WHERE enabled=1');
     for (const d of rows) {
       const stale = !d.last_seen || (Date.now() - new Date(d.last_seen).getTime()) / 60000 > OFFLINE_AFTER_MIN;
