@@ -90,8 +90,10 @@ const { dbConfig } = require('../db-config');
       pts.forEach((v, i) => rows.push([d.id, Math.max(0, Math.min(d.capacity_l, v + shift * (i / 95))).toFixed(2),
         (Number(d.temperature_c ?? 9) + Math.sin(i / 8) * 0.8).toFixed(1), new Date(Date.now() - (95 - i) * 15 * 6e4)]));
     }
-    if (rows.length) await conn.query('INSERT INTO level_readings (dispenser_id, level_l, temperature_c, created_at) VALUES ?', [rows]);
-    console.log('Seeded level history.');
+    if (rows.length) {
+      await conn.query('INSERT INTO level_readings (dispenser_id, level_l, temperature_c, created_at) VALUES ?', [rows]);
+      console.log('Seeded level history.');
+    }
   }
 
   // Optional first admin from env (used by Docker): only if there are no users yet.

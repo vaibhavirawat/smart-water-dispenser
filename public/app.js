@@ -1,3 +1,4 @@
+/* global SAMPLE */
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const store = {
@@ -5,20 +6,37 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* storage blocked */ } },
 };
 
-let dispensers = [], editingId = null, failures = 0, isAdmin = false, me = null, loaded = false, showResolved = false;
+let dispensers = [], editingId = null, failures = 0, isAdmin = false, me = null, loaded = false, showResolved = false, offline = false;
 let view = store.get('swd_view', 'cards');
 const tankEls = new Map(); // id -> element, so water levels animate instead of re-rendering
 
 // ---------- api / helpers ----------
-async function api(path, method = 'GET', body) {
-  const r = await fetch('/api' + path, {
-    method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
-  });
+class Unreachable extends Error {} // no connection, or a gateway error because the server is down
+
+async function rawApi(path, method = 'GET', body) {
+  let r;
+  try {
+    r = await fetch('/api' + path, {
+      method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch { throw new Unreachable('Cannot reach the server'); }
+  if ([502, 503, 504].includes(r.status)) throw new Unreachable('Cannot reach the server');
   if (r.status === 401 && !path.startsWith('/auth/password')) { location.href = '/login.html'; throw new Error('Login required'); }
   const data = r.status === 204 ? null : await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data?.error || `Request failed (${r.status})`);
   return data;
 }
+
+// While offline everything is read-only and served from the built-in sample data (public/sample.js).
+function sampleApi(path, method) {
+  if (method !== 'GET') throw new Error('Offline demo is read-only');
+  const [, base, id, sub] = path.split('?')[0].match(/^\/(\w+)(?:\/(\d+))?(?:\/(\w+))?/) || [];
+  if (base === 'dashboard') return SAMPLE.dashboard();
+  if (base === 'alerts') return SAMPLE.dashboard().alerts;
+  if (base === 'dispensers' && sub && SAMPLE[sub]) return SAMPLE[sub](+id);
+  throw new Error('Not available offline');
+}
+const api = async (path, method = 'GET', body) => offline ? sampleApi(path, method) : rawApi(path, method, body);
 function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
   clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2600);
@@ -33,6 +51,23 @@ function ago(d) {
 }
 const fmtEta = h => h == null ? '–' : h < 1 ? '< 1 h' : h < 48 ? `~${Math.round(h)} h` : `~${Math.round(h / 24)} d`;
 const barColor = d => d.status === 'EMPTY' ? 'var(--red)' : d.status === 'LOW' ? 'var(--amber)' : 'var(--blue)';
+
+// ---------- online / offline ----------
+// Online: real data and full controls for your role. Offline: sample data, read-only, retrying in the background.
+function applyMode() {
+  const canWrite = !offline && me?.role === 'admin';
+  isAdmin = canWrite;
+  $('#offlineBar').hidden = !offline;
+  $('#addBtn').hidden = $('#usersBtn').hidden = !canWrite;
+  for (const id of ['#exportBtn', '#pwBtn', '#logout']) $(id).hidden = offline;
+  $('#who').textContent = offline ? 'offline demo' : `${me.username} · ${me.role}`;
+}
+function setOffline(on) {
+  if (offline === on) return;
+  offline = on; applyMode();
+  if (on) { tankEls.clear(); rowEls.clear(); $('#list').innerHTML = ''; }
+}
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => { /* page still works online */ });
 
 // ---------- theme ----------
 function applyTheme(t) {
@@ -212,9 +247,21 @@ function barChart(el, data, label, title) { // label(i) says which x-axis labels
   el.innerHTML = out;
 }
 
+function showOfflineDemo() {
+  setOffline(true);
+  const d = SAMPLE.dashboard();
+  dispensers = d.dispensers; loaded = true; failures = 0;
+  renderCards(d.stats); renderList(); renderAlerts(d.alerts);
+  barChart($('#daily'), d.daily.map(x => ({ x: x.date.slice(5), v: x.liters })), () => true, 'Usage per day, last 7 days (sample)');
+  barChart($('#hourly'), d.hourly.map(h => ({ x: h.hour, v: h.liters })), i => i % 2 === 0, 'Usage per hour today (sample)');
+  $('#conn').className = 'pill bad'; $('#conn').textContent = '● Offline';
+  $('#updated').textContent = 'Retrying every 5 s';
+}
+
 async function refresh() {
   try {
-    const d = await api('/dashboard');
+    const d = await rawApi('/dashboard');
+    setOffline(false);
     if (showResolved) d.alerts = await api('/alerts?all=1');
     dispensers = d.dispensers; loaded = true;
     renderCards(d.stats); renderList(); renderAlerts(d.alerts);
@@ -223,7 +270,8 @@ async function refresh() {
     failures = 0;
     $('#conn').className = 'pill ok'; $('#conn').textContent = '● Live';
     $('#updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
-  } catch {
+  } catch (e) {
+    if (e instanceof Unreachable) return showOfflineDemo();
     if (++failures >= 2 || !loaded) { $('#conn').className = 'pill bad'; $('#conn').textContent = '● Disconnected'; }
     if (!loaded) $('#list').innerHTML = '<div class="empty" role="alert">Could not load the dashboard. <button id="retry">Try again</button></div>';
   }
@@ -384,10 +432,14 @@ $('#exportBtn').onclick = () => { location.href = '/api/export/events.csv?days=3
 $('#logout').onclick = async () => { await fetch('/api/auth/logout', { method: 'POST' }); location.href = '/login.html'; };
 
 (async () => {
-  me = await api('/auth/me');
-  isAdmin = me.role === 'admin';
-  $('#who').textContent = `${me.username} · ${me.role}`;
-  $('#addBtn').hidden = $('#usersBtn').hidden = !isAdmin;
+  try {
+    me = await rawApi('/auth/me');
+  } catch (e) {
+    if (!(e instanceof Unreachable)) throw e;
+    me = { username: 'offline', role: 'viewer' }; // the server is down: open straight into the offline demo
+    offline = true;
+  }
+  applyMode();
   $('#sort').value = store.get('swd_sort', 'name');
   await refresh();
   let timer = setInterval(refresh, 5000);

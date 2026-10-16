@@ -3,8 +3,8 @@ const assert = require('node:assert/strict');
 const { setup, newDispenser, DEVICE } = require('./helpers');
 const { outbox } = require('../mailer');
 
-let admin, viewer, makeClient;
-setup('features', c => ({ admin, viewer, makeClient } = c));
+let admin, viewer, makeClient, base;
+setup('features', c => ({ admin, viewer, makeClient, base } = c));
 
 const alertTypes = async id =>
   (await admin.get('/api/alerts')).body.filter(a => a.dispenser_id === id).map(a => a.type).sort();
@@ -108,4 +108,32 @@ test('admins with an email get one message per new alert, with a cooldown', asyn
   await sleep(300);
   assert.equal(outbox.length, sent, 'no repeat mail for the same alert type inside the cooldown');
   await admin.put('/api/auth/email', { email: '' });
+});
+
+test('offline sample data has exactly the shape of the real dashboard API', async () => {
+  const SAMPLE = require('../public/sample.js');
+  const d = await newDispenser(admin, { capacity_l: 10, level_l: 1 });
+  const dev = makeClient();
+  await dev.post(`/api/dispensers/${d.id}/readings`, { level_l: 1 }, DEVICE); // opens a LOW_LEVEL alert
+  await dev.post(`/api/dispensers/${d.id}/dispense`, { volume_ml: 100 }, DEVICE);
+  const real = (await viewer.get('/api/dashboard')).body, sample = SAMPLE.dashboard();
+  assert.deepEqual(Object.keys(sample).sort(), Object.keys(real).sort());
+  for (const k of Object.keys(real.stats)) assert.ok(k in sample.stats, `stats.${k}`);
+  for (const k of Object.keys(real.dispensers[0])) assert.ok(k in sample.dispensers[0], `dispenser.${k}`);
+  for (const k of Object.keys(real.alerts[0])) assert.ok(k in sample.alerts[0], `alert.${k}`);
+  assert.deepEqual(Object.keys(sample.daily[0]), Object.keys(real.daily[0]));
+  assert.deepEqual(Object.keys(sample.hourly[0]), Object.keys(real.hourly[0]));
+  assert.equal(sample.daily.length, real.daily.length);
+  assert.equal(sample.hourly.length, real.hourly.length);
+  const id = sample.dispensers[0].id;
+  assert.ok(SAMPLE.history(id).length > 50 && 'level_l' in SAMPLE.history(id)[0]);
+  assert.ok('volume_ml' in SAMPLE.events(id)[0] && 'added_l' in SAMPLE.refills(id)[0]);
+});
+
+test('the service worker and sample data are served as scripts', async () => {
+  for (const f of ['/sw.js', '/sample.js', '/app.js']) {
+    const r = await fetch(base + f);
+    assert.equal(r.status, 200, f);
+    assert.match(r.headers.get('content-type'), /javascript/, f);
+  }
 });

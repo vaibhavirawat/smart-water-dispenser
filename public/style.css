@@ -116,3 +116,6 @@ dialog label{display:block;margin:10px 0;font-size:12px;color:var(--muted)}dialo
   .table-wrap{background:linear-gradient(90deg,var(--panel) 30%,transparent),linear-gradient(90deg,transparent,var(--panel) 70%) 100% 0,radial-gradient(farthest-side at 0 50%,#0003,transparent),radial-gradient(farthest-side at 100% 50%,#0003,transparent) 100% 0;background-repeat:no-repeat;background-size:40px 100%,40px 100%,14px 100%,14px 100%;background-attachment:local,local,scroll,scroll}
   dialog{padding:16px}
 }
+
+.offline-bar{background:#e39b0b22;border-bottom:1px solid var(--amber);color:var(--text);padding:8px 24px;font-size:13px;text-align:center}
+.offline-bar[hidden]{display:none}

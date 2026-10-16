@@ -37,6 +37,10 @@ A full-stack system for monitoring a fleet of smart water dispensers: devices re
 <p><img src="docs/dashboard-light.png" alt="Dashboard (light theme)" width="80%"></p>
 </details>
 
+## Online and offline modes
+- **Online** (the server is reachable): the dashboard shows only real data from your database. With `SEED_DEMO=false` (the default in `.env.example`) a new database starts empty, so you add dispensers yourself or let ESP32 devices report in.
+- **Offline** (no connection, or the server is down): the dashboard switches to built-in sample data in **read-only** mode, with an "Offline demo" banner and all editing controls hidden. It retries every 5 seconds and returns to live data by itself when the server answers again. A small service worker keeps the dashboard page available so it can open even while the server is unreachable (browsers only allow this on `https://` or `localhost`).
+
 ## Project layout
 ```
 server.js            app wiring: security headers, static files, routers, background job
@@ -44,7 +48,7 @@ src/config.js        environment settings        src/db.js    MySQL pool + trans
 src/http.js          errors, validation helpers  auth.js      scrypt hashing, signed sessions
 src/routes/          auth, users, dispensers (+ device API), analytics
 src/services/        dispenser status/forecast, alerts, email notifications, analytics queries
-public/              dashboard (app.js, style.css) and login page, no inline scripts
+public/              dashboard (app.js, style.css), login page, sample.js (offline demo data), sw.js (offline shell)
 test/                helpers.js + accounts, dispensers, features, recovery tests
 ```
 
