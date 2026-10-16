@@ -5,7 +5,7 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* storage blocked */ } },
 };
 
-let dispensers = [], editingId = null, failures = 0, isAdmin = false, me = null;
+let dispensers = [], editingId = null, failures = 0, isAdmin = false, me = null, loaded = false, showResolved = false;
 let view = store.get('swd_view', 'cards');
 const tankEls = new Map(); // id -> element, so water levels animate instead of re-rendering
 
@@ -31,6 +31,7 @@ function ago(d) {
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86400)}d ago`;
 }
+const fmtEta = h => h == null ? '–' : h < 1 ? '< 1 h' : h < 48 ? `~${Math.round(h)} h` : `~${Math.round(h / 24)} d`;
 const barColor = d => d.status === 'EMPTY' ? 'var(--red)' : d.status === 'LOW' ? 'var(--amber)' : 'var(--blue)';
 
 // ---------- theme ----------
@@ -52,7 +53,7 @@ function renderCards(s) {
     ['Dispenses today', s.today_dispenses, 0], ['Open alerts', s.open_alerts, 0],
   ];
   const box = $('#cards');
-  if (!box.children.length)
+  if (!box.children.length || box.querySelector('.sk'))
     box.innerHTML = items.map(([l]) => `<div class="card"><div class="v" data-v="0">0</div><div class="l">${l}</div></div>`).join('');
   [...box.children].forEach((c, i) => countTo(c.querySelector('.v'), items[i][1], items[i][2]));
 }
@@ -95,11 +96,14 @@ function tankHTML(d) {
       <div class="row"><span>Level</span><span class="lv"></span></div>
       <div class="row"><span>Temperature</span><span class="tp"></span></div>
       <div class="row"><span>Used today</span><span class="td"></span></div>
+      <div class="row"><span>Empty in</span><span class="eta"></span></div>
       <div class="row"><span>Last seen</span><span class="ls"></span></div>
       <div class="btns"></div></div>`;
 }
 function fillTank(el, d) {
   el.dataset.id = d.id;
+  el.tabIndex = 0;
+  el.setAttribute('aria-label', `${d.name}, ${d.location}. ${d.status}, ${Math.round(d.level_pct)} percent full. Press Enter for details.`);
   el.querySelector('.tank').className = `tank st-${d.status}`;
   el.querySelector('.water').style.height = Math.max(0, Math.min(100, d.level_pct)) + '%';
   el.querySelector('.pct').textContent = Math.round(d.level_pct) + '%';
@@ -109,19 +113,47 @@ function fillTank(el, d) {
   el.querySelector('.lv').textContent = `${d.level_l.toFixed(1)} / ${d.capacity_l} L`;
   el.querySelector('.tp').textContent = d.temperature_c != null ? d.temperature_c + '°C' : '–';
   el.querySelector('.td').textContent = (d.today_ml / 1000).toFixed(1) + ' L';
+  el.querySelector('.eta').textContent = fmtEta(d.hours_to_empty);
   el.querySelector('.ls').textContent = ago(d.last_seen);
   const btns = el.querySelector('.btns'), html = actionButtons(d);
   if (btns.dataset.h !== html) { btns.innerHTML = html; btns.dataset.h = html; }
 }
 
+const rowEls = new Map(); // id -> <tr>, updated in place like the tank cards so the table never flickers
+const ROW_HTML = `<td><b></b></td><td class="c-loc"></td>
+  <td><span class="bar"><i></i></span><span class="c-lv"></span> <small class="c-pct"></small></td>
+  <td class="c-tp"></td><td class="c-td"></td><td class="c-eta"></td>
+  <td><span class="badge"></span></td><td><small class="c-ls"></small></td><td class="c-act"></td>`;
+function fillRow(tr, d) {
+  tr.dataset.id = d.id;
+  tr.setAttribute('aria-label', `${d.name}, ${d.status}, ${Math.round(d.level_pct)} percent full. Press Enter for details.`);
+  const q = s => tr.querySelector(s);
+  q('b').textContent = d.name; q('.c-loc').textContent = d.location;
+  const bar = q('.bar i'); bar.style.width = d.level_pct + '%'; bar.style.background = barColor(d);
+  q('.c-lv').textContent = `${d.level_l.toFixed(1)} / ${d.capacity_l} L`; q('.c-pct').textContent = `(${d.level_pct}%)`;
+  q('.c-tp').textContent = d.temperature_c != null ? d.temperature_c + '°C' : '–';
+  q('.c-td').textContent = (d.today_ml / 1000).toFixed(1) + ' L';
+  q('.c-eta').textContent = fmtEta(d.hours_to_empty);
+  const b = q('.badge'); b.className = `badge ${d.status}`; b.textContent = d.status;
+  q('.c-ls').textContent = ago(d.last_seen);
+  const act = q('.c-act'), html = actionButtons(d);
+  if (act.dataset.h !== html) { act.innerHTML = html; act.dataset.h = html; }
+}
+
 function renderList() {
   const list = visible(), host = $('#list');
-  $('#vCards').classList.toggle('on', view === 'cards');
-  $('#vTable').classList.toggle('on', view === 'table');
+  for (const [v, id] of [['cards', '#vCards'], ['table', '#vTable']]) {
+    $(id).classList.toggle('on', view === v);
+    $(id).setAttribute('aria-pressed', String(view === v));
+  }
 
-  if (!list.length) { host.innerHTML = '<div class="empty">No dispensers match.</div>'; tankEls.clear(); return; }
+  if (!list.length) {
+    host.innerHTML = `<div class="empty">${dispensers.length ? 'No dispensers match your filters.' : 'No dispensers yet.' + (isAdmin ? ' Use “+ Add dispenser” to create the first one.' : '')}</div>`;
+    tankEls.clear(); rowEls.clear(); return;
+  }
 
   if (view === 'cards') {
+    rowEls.clear();
     let grid = host.querySelector('.tanks');
     if (!grid) { host.innerHTML = '<div class="tanks"></div>'; grid = host.firstChild; tankEls.clear(); }
     const keep = new Set(list.map(d => d.id));
@@ -139,29 +171,32 @@ function renderList() {
     });
   } else {
     tankEls.clear();
-    host.innerHTML = `<div class="table-wrap"><table>
-      <thead><tr><th>Name</th><th>Location</th><th>Water level</th><th>Temp</th><th>Today</th><th>Status</th><th>Last seen</th><th></th></tr></thead>
-      <tbody>${list.map(d => `
-        <tr class="click" data-id="${d.id}">
-          <td><b>${esc(d.name)}</b></td><td>${esc(d.location)}</td>
-          <td><span class="bar"><i style="width:${d.level_pct}%;background:${barColor(d)}"></i></span>${d.level_l.toFixed(1)} / ${d.capacity_l} L <small>(${d.level_pct}%)</small></td>
-          <td>${d.temperature_c != null ? d.temperature_c + '°C' : '–'}</td>
-          <td>${(d.today_ml / 1000).toFixed(1)} L</td>
-          <td><span class="badge ${d.status}">${d.status}</span></td>
-          <td><small>${ago(d.last_seen)}</small></td>
-          <td>${actionButtons(d)}</td>
-        </tr>`).join('')}</tbody></table></div>`;
+    let body = host.querySelector('tbody');
+    if (!body) {
+      host.innerHTML = `<div class="table-wrap"><table>
+        <thead><tr><th>Name</th><th>Location</th><th>Water level</th><th>Temp</th><th>Today</th><th>Empty in</th><th>Status</th><th>Last seen</th><th><span class="sr">Actions</span></th></tr></thead>
+        <tbody></tbody></table></div>`;
+      body = host.querySelector('tbody'); rowEls.clear();
+    }
+    const keep = new Set(list.map(d => d.id));
+    for (const [id, tr] of rowEls) if (!keep.has(id)) { tr.remove(); rowEls.delete(id); }
+    list.forEach((d, i) => {
+      let tr = rowEls.get(d.id);
+      if (!tr) { tr = document.createElement('tr'); tr.className = 'click'; tr.tabIndex = 0; tr.innerHTML = ROW_HTML; rowEls.set(d.id, tr); }
+      fillRow(tr, d);
+      if (body.children[i] !== tr) body.insertBefore(tr, body.children[i] || null);
+    });
   }
 }
 
 function renderAlerts(list) {
   $('#alerts').innerHTML = list.length ? list.map(a => `
-    <li><div><span class="t">${esc(a.type.replace('_', ' '))}</span><br>${esc(a.message)} <small class="muted">${ago(a.created_at)}</small></div>
-    ${isAdmin ? `<button class="sm" data-resolve="${a.id}">Resolve</button>` : ''}</li>`).join('')
-    : '<li class="empty" style="justify-content:center">No open alerts 🎉</li>';
+    <li class="${a.resolved ? 'resolved' : ''}"><div><span class="t">${esc(a.type.replace('_', ' '))}</span>${a.resolved ? ' <span class="muted">· resolved ' + ago(a.resolved_at) + '</span>' : ''}<br>${esc(a.message)} <small class="muted">${ago(a.created_at)}</small></div>
+    ${isAdmin && !a.resolved ? `<button class="sm" data-resolve="${a.id}">Resolve</button>` : ''}</li>`).join('')
+    : `<li class="empty" style="justify-content:center">${showResolved ? 'No alerts yet' : 'No open alerts 🎉'}</li>`;
 }
 
-function barChart(el, data, label) {
+function barChart(el, data, label, title) { // label(i) says which x-axis labels to draw
   const W = el.viewBox.baseVal.width, H = 180, pad = { l: 30, b: 22, t: 8 };
   const max = Math.max(1, ...data.map(d => d.v)), bw = (W - pad.l) / data.length;
   let out = [0, 0.5, 1].map(f => {
@@ -173,23 +208,24 @@ function barChart(el, data, label) {
     out += `<rect class="bar-r" x="${pad.l + i * bw + 2}" y="${H - pad.b - h}" width="${bw - 4}" height="${h}" rx="2"><title>${d.x}: ${d.v} L</title></rect>`;
     if (label(i)) out += `<text x="${pad.l + i * bw + bw / 2}" y="${H - 6}" text-anchor="middle">${d.x}</text>`;
   });
+  el.setAttribute('aria-label', `${title}: ${data.map(d => `${d.x}: ${d.v} L`).join(', ')}`);
   el.innerHTML = out;
 }
 
 async function refresh() {
   try {
-    const [s, ds, al, daily, hourly] = await Promise.all([
-      api('/stats'), api('/dispensers'), api('/alerts'), api('/usage/daily?days=7'), api('/usage/hourly'),
-    ]);
-    dispensers = ds;
-    renderCards(s); renderList(); renderAlerts(al);
-    barChart($('#daily'), daily.map(d => ({ x: d.date.slice(5), v: d.liters })), () => true);
-    barChart($('#hourly'), hourly.map(h => ({ x: h.hour, v: h.liters })), i => i % 2 === 0);
+    const d = await api('/dashboard');
+    if (showResolved) d.alerts = await api('/alerts?all=1');
+    dispensers = d.dispensers; loaded = true;
+    renderCards(d.stats); renderList(); renderAlerts(d.alerts);
+    barChart($('#daily'), d.daily.map(x => ({ x: x.date.slice(5), v: x.liters })), () => true, 'Usage per day, last 7 days');
+    barChart($('#hourly'), d.hourly.map(h => ({ x: h.hour, v: h.liters })), i => i % 2 === 0, 'Usage per hour today');
     failures = 0;
     $('#conn').className = 'pill ok'; $('#conn').textContent = '● Live';
     $('#updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
   } catch {
-    if (++failures >= 2) { $('#conn').className = 'pill bad'; $('#conn').textContent = '● Disconnected'; }
+    if (++failures >= 2 || !loaded) { $('#conn').className = 'pill bad'; $('#conn').textContent = '● Disconnected'; }
+    if (!loaded) $('#list').innerHTML = '<div class="empty" role="alert">Could not load the dashboard. <button id="retry">Try again</button></div>';
   }
 }
 
@@ -212,6 +248,13 @@ $('#list').addEventListener('click', e => {
   const row = e.target.closest('[data-id]');
   if (row) openDetail(+row.dataset.id);
 });
+$('#list').addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const row = e.target.closest('[data-id]');
+  if (row && e.target === row) { e.preventDefault(); openDetail(+row.dataset.id); } // not when a button inside has focus
+});
+$('#list').addEventListener('click', e => { if (e.target.id === 'retry') refresh(); });
+$('#showResolved').addEventListener('change', e => { showResolved = e.target.checked; refresh(); });
 $('#alerts').addEventListener('click', async e => {
   const id = e.target.dataset.resolve; if (!id) return;
   try { await api(`/alerts/${id}/resolve`, 'POST'); refresh(); } catch (err) { toast(err.message); }
@@ -239,6 +282,7 @@ function lineChart(el, pts, cap) {
   out += `<path class="area" d="${line}L${X(t1)} ${Y(0)}L${X(t0)} ${Y(0)}Z"/><path class="line" d="${line}"/>`;
   out += `<text x="${p.l}" y="${H - 5}">${hm(t0)}</text><text x="${W - p.r}" y="${H - 5}" text-anchor="end">${hm(t1)}</text>`;
   out += s.map(q => `<circle cx="${X(+new Date(q.created_at))}" cy="${Y(q.level_l)}" r="6" fill="transparent"><title>${hm(q.created_at)} – ${q.level_l.toFixed(1)} L</title></circle>`).join('');
+  el.setAttribute('aria-label', `Water level over the last 24 hours, now ${pts[pts.length - 1].level_l.toFixed(1)} of ${cap} litres`);
   el.innerHTML = out;
 }
 async function openDetail(id) {
@@ -246,13 +290,18 @@ async function openDetail(id) {
   $('#dName').textContent = d.name; $('#dSub').textContent = d.location;
   $('#dStats').innerHTML = [
     ['Level', `${d.level_l.toFixed(1)} / ${d.capacity_l} L`], ['Status', d.status], ['Temp', d.temperature_c != null ? d.temperature_c + '°C' : '–'],
-    ['Today', (d.today_ml / 1000).toFixed(1) + ' L'], ['Last seen', ago(d.last_seen)],
+    ['Today', (d.today_ml / 1000).toFixed(1) + ' L'], ['Empty in', fmtEta(d.hours_to_empty)], ['Last seen', ago(d.last_seen)],
+    ['Alerts at', `< ${d.effective_low_pct}% · > ${d.effective_high_temp_c}°C`],
   ].map(([k, v]) => `<div><b>${esc(v)}</b><span>${k}</span></div>`).join('');
-  $('#dChart').innerHTML = ''; $('#dEvents').innerHTML = '<li class="muted">Loading…</li>';
+  $('#dChart').innerHTML = ''; $('#dEvents').innerHTML = '<li class="muted">Loading…</li>'; $('#dRefills').innerHTML = '';
   $('#detail').showModal();
   try {
-    const [hist, ev] = await Promise.all([api(`/dispensers/${id}/history?hours=24`), api(`/dispensers/${id}/events`)]);
+    const [hist, ev, refills] = await Promise.all([
+      api(`/dispensers/${id}/history?hours=24`), api(`/dispensers/${id}/events`), api(`/dispensers/${id}/refills`)]);
     lineChart($('#dChart'), hist, d.capacity_l);
+    $('#dRefills').innerHTML = refills.length ? refills.slice(0, 8).map(r =>
+      `<li><span>+${r.added_l} L</span><span class="muted">${new Date(r.created_at).toLocaleString()}</span></li>`).join('')
+      : '<li class="muted">No refills recorded</li>';
     $('#dEvents').innerHTML = ev.length ? ev.slice(0, 15).map(e =>
       `<li><span>${e.volume_ml} ml</span><span class="muted">${new Date(e.created_at).toLocaleString()}</span></li>`).join('')
       : '<li class="muted">No dispenses yet</li>';
@@ -267,6 +316,7 @@ function openForm(d) {
   form.name.value = d?.name ?? ''; form.location.value = d?.location ?? '';
   form.capacity_l.value = d?.capacity_l ?? 20; form.level_l.value = d?.level_l ?? 0;
   form.level_l.disabled = !!d;
+  form.low_level_pct.value = d?.low_level_pct ?? ''; form.high_temp_c.value = d?.high_temp_c ?? '';
   $('#formErr').textContent = ''; dlg.showModal();
 }
 $('#addBtn').onclick = () => openForm();
@@ -274,6 +324,9 @@ form.addEventListener('submit', async e => {
   e.preventDefault();
   const body = { name: form.name.value, location: form.location.value, capacity_l: +form.capacity_l.value };
   if (editingId === null) body.level_l = +form.level_l.value;
+  // blank = use the server default (null clears an override when editing)
+  body.low_level_pct = form.low_level_pct.value === '' ? null : +form.low_level_pct.value;
+  body.high_temp_c = form.high_temp_c.value === '' ? null : +form.high_temp_c.value;
   try {
     await (editingId === null ? api('/dispensers', 'POST', body) : api(`/dispensers/${editingId}`, 'PUT', body));
     dlg.close(); toast('Saved'); refresh();
@@ -337,5 +390,9 @@ $('#logout').onclick = async () => { await fetch('/api/auth/logout', { method: '
   $('#addBtn').hidden = $('#usersBtn').hidden = !isAdmin;
   $('#sort').value = store.get('swd_sort', 'name');
   await refresh();
-  setInterval(refresh, 5000);
+  let timer = setInterval(refresh, 5000);
+  document.addEventListener('visibilitychange', () => { // no polling for a tab nobody is looking at
+    clearInterval(timer);
+    if (!document.hidden) { refresh(); timer = setInterval(refresh, 5000); }
+  });
 })();

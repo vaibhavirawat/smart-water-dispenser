@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<a class="skip" href="#main">Skip to dashboard</a>
 <header>
   <h1><span class="logo">💧</span> Smart Water Dispenser <span class="sub">Management</span></h1>
   <div class="right">
@@ -16,15 +17,15 @@
     <button id="themeBtn" class="icon" title="Toggle dark / light" aria-label="Toggle theme">🌙</button>
     <button id="exportBtn" title="Download dispense history as CSV">⬇ Export CSV</button>
     <button id="usersBtn" hidden>👥 Users</button>
-    <button id="pwBtn" title="Change your password">🔑</button>
+    <button id="pwBtn" title="Account and password" aria-label="Account and password">🔑</button>
     <span id="who" class="who"></span>
     <button id="logout">Sign out</button>
     <button id="addBtn" class="primary" hidden>+ Add dispenser</button>
   </div>
 </header>
 
-<main>
-  <section class="cards" id="cards"></section>
+<main id="main">
+  <section class="cards" id="cards" aria-label="Summary"><div class="card sk"><div class="v">&nbsp;</div><div class="l">&nbsp;</div></div><div class="card sk"><div class="v">&nbsp;</div><div class="l">&nbsp;</div></div><div class="card sk"><div class="v">&nbsp;</div><div class="l">&nbsp;</div></div><div class="card sk"><div class="v">&nbsp;</div><div class="l">&nbsp;</div></div><div class="card sk"><div class="v">&nbsp;</div><div class="l">&nbsp;</div></div><div class="card sk"><div class="v">&nbsp;</div><div class="l">&nbsp;</div></div><div class="card sk"><div class="v">&nbsp;</div><div class="l">&nbsp;</div></div></section>
 
   <section class="panel toolbar-panel">
     <div class="toolbar">
@@ -44,21 +45,21 @@
         <button id="vTable" data-view="table">☰ Table</button>
       </div>
     </div>
-    <div id="list"></div>
+    <div id="list" aria-live="off"><div class="skgrid"><div class="sk-tank sk"></div><div class="sk-tank sk"></div><div class="sk-tank sk"></div></div></div>
   </section>
 
   <section class="grid">
     <div class="panel">
-      <div class="panel-head"><h2>Open alerts</h2></div>
+      <div class="panel-head"><h2>Alerts</h2><label class="chk"><input type="checkbox" id="showResolved"> Show resolved</label></div>
       <ul id="alerts" class="alerts"></ul>
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Usage – last 7 days (L)</h2></div>
-      <svg id="daily" class="chart" viewBox="0 0 400 180"></svg>
+      <svg id="daily" class="chart" viewBox="0 0 400 180" role="img" aria-label="Usage per day"></svg>
     </div>
     <div class="panel full">
       <div class="panel-head"><h2>Usage today by hour (L)</h2></div>
-      <svg id="hourly" class="chart" viewBox="0 0 1200 180"></svg>
+      <svg id="hourly" class="chart" viewBox="0 0 1200 180" role="img" aria-label="Usage per hour today"></svg>
     </div>
   </section>
 </main>
@@ -71,6 +72,10 @@
     <label>Location <input name="location" required maxlength="120"></label>
     <label>Capacity (L) <input name="capacity_l" type="number" min="1" step="0.1" value="20" required></label>
     <label>Current level (L) <input name="level_l" type="number" min="0" step="0.1" value="0"></label>
+    <details class="adv"><summary>Alert thresholds (optional)</summary>
+      <label>Low-level alert below (%) <input name="low_level_pct" type="number" min="1" max="99" step="1" placeholder="server default (20)"></label>
+      <label>High-temperature alert above (°C) <input name="high_temp_c" type="number" min="0" max="100" step="0.5" placeholder="server default (25)"></label>
+    </details>
     <p id="formErr" class="err"></p>
     <div class="actions"><button type="button" data-close>Cancel</button><button type="submit" class="primary">Save</button></div>
   </form>
@@ -81,9 +86,11 @@
   <div class="dhead"><div><h3 id="dName"></h3><div class="muted" id="dSub"></div></div><button data-close class="icon" aria-label="Close">✕</button></div>
   <div class="dstats" id="dStats"></div>
   <h4>Water level – last 24 hours</h4>
-  <svg id="dChart" class="chart" viewBox="0 0 560 200"></svg>
+  <svg id="dChart" class="chart" viewBox="0 0 560 200" role="img" aria-label="Water level over the last 24 hours"></svg>
   <h4>Recent dispenses</h4>
   <ul id="dEvents" class="events"></ul>
+  <h4>Recent refills</h4>
+  <ul id="dRefills" class="events"></ul>
 </dialog>
 
 <!-- users -->

@@ -86,3 +86,33 @@ dialog label{display:block;margin:10px 0;font-size:12px;color:var(--muted)}dialo
 #toast.show{opacity:1;transform:translate(-50%,0)}
 @media(max-width:800px){.grid{grid-template-columns:1fr}header,main{padding-left:14px;padding-right:14px}.who{display:none}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+
+/* accessibility */
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.tank-card:focus-visible,tr.click:focus-visible{outline-offset:-2px;border-color:var(--blue)}
+.skip{position:absolute;left:-999px;top:8px;z-index:60;background:var(--blue);color:#fff;padding:8px 14px;border-radius:9px}.skip:focus{left:8px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* loading skeletons */
+.sk{position:relative;overflow:hidden;color:transparent!important}
+.sk::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,#8a97a633,transparent);transform:translateX(-100%);animation:shimmer 1.3s infinite}
+@keyframes shimmer{to{transform:translateX(100%)}}
+.card.sk{animation:none;min-height:70px}
+.skgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}.sk-tank{height:170px;border-radius:14px;background:var(--bg);border:1px solid var(--line)}
+
+/* alerts panel, optional form section */
+.chk{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer}.chk input{padding:0}
+.alerts li.resolved{opacity:.55}.alerts li.resolved .t{color:var(--muted)}
+.adv{margin-top:8px}.adv summary{cursor:pointer;color:var(--muted);font-size:12px}
+.empty button{margin-left:8px}
+
+/* phones */
+@media(max-width:600px){
+  header{padding:10px 14px}h1{font-size:16px}h1 .sub{display:none}
+  .right{gap:6px;width:100%;justify-content:flex-start}#updated{display:none}
+  button{padding:6px 10px}
+  .cards{grid-template-columns:repeat(2,1fr)}.card .v{font-size:23px}
+  .tanks,.skgrid{grid-template-columns:1fr}
+  .table-wrap{background:linear-gradient(90deg,var(--panel) 30%,transparent),linear-gradient(90deg,transparent,var(--panel) 70%) 100% 0,radial-gradient(farthest-side at 0 50%,#0003,transparent),radial-gradient(farthest-side at 100% 50%,#0003,transparent) 100% 0;background-repeat:no-repeat;background-size:40px 100%,40px 100%,14px 100%,14px 100%;background-attachment:local,local,scroll,scroll}
+  dialog{padding:16px}
+}
