@@ -8,7 +8,7 @@ for (let i = 0; i < 16; i++) {
   b.style.cssText = `left:${Math.random() * 100}%;width:${s}px;height:${s}px;animation-duration:${8 + Math.random() * 12}s;animation-delay:${-Math.random() * 15}s;--dx:${(Math.random() - .5) * 80}px`;
   $('bubbles').appendChild(b);
 }
-try { const u = localStorage.getItem('swd_user'); if (u) { $('u').value = u; $('rem').checked = true; } } catch {}
+try { const u = localStorage.getItem('swd_user'); if (u) { $('u').value = u; $('rem').checked = true; } } catch { /* storage blocked */ }
 
 // already signed in? skip the form (but not when following a reset link)
 if (!location.hash.startsWith('#reset=')) fetch('/api/auth/me').then(r => { if (r.ok) location.replace('/'); }).catch(() => {});
@@ -105,7 +105,7 @@ card.addEventListener('submit', async e => {
       if (!username || !password) return fail('Enter your username and password');
       busy('Signing in…');
       await call('/api/auth/login', { username, password });
-      try { $('rem').checked ? localStorage.setItem('swd_user', username) : localStorage.removeItem('swd_user'); } catch {}
+      try { $('rem').checked ? localStorage.setItem('swd_user', username) : localStorage.removeItem('swd_user'); } catch { /* storage blocked */ }
       return enter('Welcome ✓');
     }
     if (mode === 'up') {

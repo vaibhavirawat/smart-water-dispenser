@@ -2,7 +2,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const store = {
   get: (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
-  set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* storage blocked */ } },
 };
 
 let dispensers = [], editingId = null, failures = 0, isAdmin = false, me = null;
@@ -188,7 +188,7 @@ async function refresh() {
     failures = 0;
     $('#conn').className = 'pill ok'; $('#conn').textContent = '● Live';
     $('#updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
-  } catch (e) {
+  } catch {
     if (++failures >= 2) { $('#conn').className = 'pill bad'; $('#conn').textContent = '● Disconnected'; }
   }
 }
@@ -310,7 +310,7 @@ $('#userForm').addEventListener('submit', async e => {
 // ---------- password ----------
 $('#pwBtn').onclick = async () => {
   $('#pwForm').reset(); $('#pwErr').textContent = ''; $('#emailMsg').textContent = '';
-  try { $('#emailForm').email.value = (await api('/auth/me')).email || ''; } catch {}
+  try { $('#emailForm').email.value = (await api('/auth/me')).email || ''; } catch { /* leave the field empty */ }
   $('#pwDlg').showModal();
 };
 $('#emailForm').addEventListener('submit', async e => {
