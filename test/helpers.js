@@ -6,6 +6,7 @@ process.env.OFFLINE_AFTER_MIN = '2';
 process.env.LOW_LEVEL_PCT = '20';
 process.env.SIGNUP_LIMIT = '1000';
 process.env.FORGOT_LIMIT = '1000';
+process.env.COMPLAINT_LIMIT = '1000';
 process.env.NODE_ENV = 'test';
 process.env.BASE_URL = 'https://water.example.test';
 

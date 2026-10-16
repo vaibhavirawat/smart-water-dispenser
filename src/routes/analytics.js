@@ -4,6 +4,7 @@ const { pool } = require('../db');
 const { wrap, HttpError } = require('../http');
 const analytics = require('../services/analytics');
 const { listDispensers } = require('../services/dispensers');
+const complaints = require('../services/complaints');
 
 const r = express.Router();
 
@@ -31,10 +32,11 @@ r.post('/api/alerts/:id/resolve', auth.requireAdmin, wrap(async (req, res) => {
 
 // Everything the dashboard shows, in one round trip (it polls this instead of five separate endpoints).
 r.get('/api/dashboard', auth.requireAuth, wrap(async (req, res) => {
-  const [stats, dispensers, alerts, daily, hourly] = await Promise.all([
+  const [stats, dispensers, alerts, daily, hourly, myComplaints] = await Promise.all([
     analytics.stats(), listDispensers(), analytics.alertList(false), analytics.usageDaily(7), analytics.usageHourly(),
+    complaints.list(req.user),
   ]);
-  res.json({ stats, dispensers, alerts, daily, hourly });
+  res.json({ stats, dispensers, alerts, daily, hourly, complaints: myComplaints });
 }));
 
 const csvCell = v => {

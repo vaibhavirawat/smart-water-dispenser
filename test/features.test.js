@@ -71,7 +71,7 @@ test('dashboard endpoint bundles everything and needs login', async () => {
   await newDispenser(admin);
   const r = await viewer.get('/api/dashboard');
   assert.equal(r.status, 200);
-  assert.deepEqual(Object.keys(r.body).sort(), ['alerts', 'daily', 'dispensers', 'hourly', 'stats']);
+  assert.deepEqual(Object.keys(r.body).sort(), ['alerts', 'complaints', 'daily', 'dispensers', 'hourly', 'stats']);
   assert.equal(r.body.stats.total, r.body.dispensers.length);
   assert.equal(r.body.daily.length, 7);
   assert.equal(r.body.hourly.length, 24);

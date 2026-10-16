@@ -17,7 +17,7 @@
       const low = pct < 20;
       return {
         id, name, location, capacity_l: cap, level_l: level, temperature_c: temp, enabled: true,
-        low_level_pct: null, high_temp_c: null, last_seen: new Date(now - (4 + i * 3) * 1000).toISOString(),
+        low_level_pct: null, high_temp_c: null, caretaker_username: null, last_seen: new Date(now - (4 + i * 3) * 1000).toISOString(),
         created_at: new Date(now - 30 * 24 * HOUR).toISOString(),
         today_ml: todayMl, used_24h_ml: perHour * 24,
         level_pct: Math.round(pct * 10) / 10, status: low ? 'LOW' : 'OK',
@@ -46,6 +46,7 @@
         today_liters: ds.reduce((s, d) => s + d.today_ml, 0) / 1000, today_dispenses: 64, open_alerts: alerts.length,
       },
       dispensers: ds, alerts, daily, hourly,
+      complaints: [], // complaints need the server, so the offline demo has none
     };
   }
 

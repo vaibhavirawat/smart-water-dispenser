@@ -74,6 +74,11 @@ const requireAdmin = (req, res, next) =>
   requireAuth(req, res, () =>
     req.user.role === 'admin' ? next() : res.status(403).json({ error: 'Admin access required' }));
 
+// Allow only the listed roles (admin always passes).
+const requireRole = (...roles) => (req, res, next) =>
+  requireAuth(req, res, () =>
+    req.user.role === 'admin' || roles.includes(req.user.role) ? next() : res.status(403).json({ error: 'You do not have access to this' }));
+
 // tiny in-memory rate limiter: max N hits per key (IP) per window
 function makeLimiter(max, windowMs) {
   const hits = new Map();
@@ -89,4 +94,4 @@ const signupLimiter = makeLimiter(+(process.env.SIGNUP_LIMIT || 5), 3600e3);  //
 const throttled = ip => loginLimiter.blocked(ip);
 const recordFail = ip => loginLimiter.record(ip);
 
-module.exports = { makeLimiter, signupLimiter, forgotLimiter, setUserLookup, hashPassword, verifyPassword, setSession, clearSession, requireAuth, requireAdmin, readToken, cookieFrom, throttled, recordFail, COOKIE };
+module.exports = { makeLimiter, signupLimiter, forgotLimiter, setUserLookup, hashPassword, verifyPassword, setSession, clearSession, requireAuth, requireAdmin, requireRole, readToken, cookieFrom, throttled, recordFail, COOKIE };

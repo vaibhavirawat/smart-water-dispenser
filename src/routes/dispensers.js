@@ -23,6 +23,14 @@ r.get('/api/dispensers/:id', auth.requireAuth, wrap(async (req, res) => {
   res.json((await listDispensers(req.params.id))[0]);
 }));
 
+// The caretaker responsible for a dispenser (null = every caretaker is notified). Must be an existing caretaker account.
+async function checkCaretaker(conn, v) {
+  if (v === null || v === '' || v === undefined) return null;
+  const [rows] = await conn.query("SELECT 1 FROM users WHERE username=? AND role='caretaker'", [String(v)]);
+  if (!rows.length) throw new HttpError(400, 'caretaker must be an existing caretaker account');
+  return String(v);
+}
+
 // Optional per-dispenser alert thresholds: null/absent means "use the server default".
 const threshold = (v, name, min, max, int) => {
   if (v === null || v === '') return null;
@@ -39,9 +47,10 @@ r.post('/api/dispensers', auth.requireAdmin, wrap(async (req, res) => {
   const level = num(b.level_l ?? 0, 'level_l', { min: 0, max: capacity });
   const lowPct = b.low_level_pct === undefined ? null : threshold(b.low_level_pct, 'low_level_pct', 1, 99, true);
   const hotC = b.high_temp_c === undefined ? null : threshold(b.high_temp_c, 'high_temp_c', 0, 100, false);
+  const caretaker = await checkCaretaker(pool, b.caretaker);
   const [r] = await pool.query(
-    'INSERT INTO dispensers (name, location, capacity_l, level_l, low_level_pct, high_temp_c, last_seen) VALUES (?,?,?,?,?,?,NOW())',
-    [name, location, capacity, level, lowPct, hotC]);
+    'INSERT INTO dispensers (name, location, capacity_l, level_l, low_level_pct, high_temp_c, caretaker_username, last_seen) VALUES (?,?,?,?,?,?,?,NOW())',
+    [name, location, capacity, level, lowPct, hotC, caretaker]);
   res.status(201).json((await listDispensers(r.insertId))[0]);
 }));
 
@@ -55,9 +64,10 @@ r.put('/api/dispensers/:id', auth.requireAdmin, wrap(async (req, res) => {
     const enabled = b.enabled !== undefined ? (b.enabled ? 1 : 0) : d.enabled;
     const lowPct = b.low_level_pct !== undefined ? threshold(b.low_level_pct, 'low_level_pct', 1, 99, true) : d.low_level_pct;
     const hotC = b.high_temp_c !== undefined ? threshold(b.high_temp_c, 'high_temp_c', 0, 100, false) : d.high_temp_c;
+    const caretaker = b.caretaker !== undefined ? await checkCaretaker(conn, b.caretaker) : d.caretaker_username;
     if (d.level_l > capacity) throw new HttpError(400, 'capacity_l cannot be below the current level');
-    await conn.query('UPDATE dispensers SET name=?, location=?, capacity_l=?, enabled=?, low_level_pct=?, high_temp_c=? WHERE id=?',
-      [name, location, capacity, enabled, lowPct, hotC, d.id]);
+    await conn.query('UPDATE dispensers SET name=?, location=?, capacity_l=?, enabled=?, low_level_pct=?, high_temp_c=?, caretaker_username=? WHERE id=?',
+      [name, location, capacity, enabled, lowPct, hotC, caretaker, d.id]);
     await evaluateAlerts(conn, await getDispenser(conn, d.id)); // a new threshold can open or clear an alert immediately
     return d.id;
   });

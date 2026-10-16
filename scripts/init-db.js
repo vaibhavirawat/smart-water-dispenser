@@ -43,6 +43,18 @@ const { dbConfig } = require('../db-config');
     }
   }
 
+  // migration: caretaker per dispenser, and the caretaker / technician roles
+  const [care] = await conn.query("SHOW COLUMNS FROM dispensers LIKE 'caretaker_username'");
+  if (!care.length) {
+    await conn.query('ALTER TABLE dispensers ADD COLUMN caretaker_username VARCHAR(50) NULL AFTER high_temp_c');
+    console.log('Migrated: added dispensers.caretaker_username');
+  }
+  const [[roleCol]] = await conn.query("SHOW COLUMNS FROM users LIKE 'role'");
+  if (!/caretaker/.test(roleCol.Type)) {
+    await conn.query("ALTER TABLE users MODIFY role ENUM('admin','caretaker','technician','viewer') NOT NULL DEFAULT 'viewer'");
+    console.log('Migrated: users.role now includes caretaker and technician');
+  }
+
   const [[{ n }]] = await conn.query('SELECT COUNT(*) n FROM dispensers');
   if (n === 0 && process.env.SEED_DEMO !== 'false') { // set SEED_DEMO=false in production to start empty
     const seed = [

@@ -32,6 +32,7 @@ app.use(require('./src/routes/auth').router);
 app.use(require('./src/routes/users'));
 app.use(require('./src/routes/dispensers'));
 app.use(require('./src/routes/analytics'));
+app.use(require('./src/routes/complaints'));
 
 // ---------- errors ----------
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
