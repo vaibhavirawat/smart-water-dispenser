@@ -6,7 +6,7 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* storage blocked */ } },
 };
 
-let dispensers = [], editingId = null, failures = 0, isAdmin = false, me = null, loaded = false, showResolved = false, offline = false;
+let dispensers = [], editingId = null, failures = 0, isAdmin = false, me = null, loaded = false, showResolved = false, offline = false, complaints = [], seenComplaints = null;
 let view = store.get('swd_view', 'cards');
 const tankEls = new Map(); // id -> element, so water levels animate instead of re-rendering
 
@@ -54,13 +54,17 @@ const barColor = d => d.status === 'EMPTY' ? 'var(--red)' : d.status === 'LOW' ?
 
 // ---------- online / offline ----------
 // Online: real data and full controls for your role. Offline: sample data, read-only, retrying in the background.
+const roleLabel = r => r === 'viewer' ? 'user' : r;
+const isStaff = () => me && (me.role === 'admin' || me.role === 'caretaker');
 function applyMode() {
   const canWrite = !offline && me?.role === 'admin';
   isAdmin = canWrite;
+  $('#complaintsPanel').hidden = offline; // complaints need the server
+  $('#cTitle').textContent = me?.role === 'technician' ? 'My jobs' : isStaff() ? 'Complaints' : 'My complaints';
   $('#offlineBar').hidden = !offline;
   $('#addBtn').hidden = $('#usersBtn').hidden = !canWrite;
   for (const id of ['#exportBtn', '#pwBtn', '#logout']) $(id).hidden = offline;
-  $('#who').textContent = offline ? 'offline demo' : `${me.username} · ${me.role}`;
+  $('#who').textContent = offline ? 'offline demo' : `${me.username} · ${roleLabel(me.role)}`;
 }
 function setOffline(on) {
   if (offline === on) return;
@@ -118,11 +122,12 @@ function visible() {
 }
 
 function actionButtons(d) {
-  return isAdmin ? `
+  const report = offline ? '' : `<button class="sm" data-act="report" data-id="${d.id}">Report a problem</button>`;
+  return report + (isAdmin ? `
     <button class="sm" data-act="refill" data-id="${d.id}">Refill</button>
     <button class="sm" data-act="toggle" data-id="${d.id}">${d.enabled ? 'Disable' : 'Enable'}</button>
     <button class="sm" data-act="edit" data-id="${d.id}">Edit</button>
-    <button class="sm danger" data-act="delete" data-id="${d.id}" aria-label="Delete">✕</button>` : '';
+    <button class="sm danger" data-act="delete" data-id="${d.id}" aria-label="Delete">✕</button>` : '');
 }
 
 function tankHTML(d) {
@@ -264,7 +269,7 @@ async function refresh() {
     setOffline(false);
     if (showResolved) d.alerts = await api('/alerts?all=1');
     dispensers = d.dispensers; loaded = true;
-    renderCards(d.stats); renderList(); renderAlerts(d.alerts);
+    renderCards(d.stats); renderList(); renderAlerts(d.alerts); setComplaints(d.complaints);
     barChart($('#daily'), d.daily.map(x => ({ x: x.date.slice(5), v: x.liters })), () => true, 'Usage per day, last 7 days');
     barChart($('#hourly'), d.hourly.map(h => ({ x: h.hour, v: h.liters })), i => i % 2 === 0, 'Usage per hour today');
     failures = 0;
@@ -286,6 +291,7 @@ async function handleAction(b) {
       case 'toggle': await api(`/dispensers/${d.id}`, 'PUT', { enabled: !d.enabled }); break;
       case 'delete': if (confirm(`Delete ${d.name} and all its history?`)) await api(`/dispensers/${d.id}`, 'DELETE'); break;
       case 'edit': return openForm(d);
+      case 'report': return openReport(d.id);
     }
     refresh();
   } catch (err) { toast(err.message); }
@@ -358,13 +364,20 @@ async function openDetail(id) {
 
 // ---------- add / edit form ----------
 const dlg = $('#dlg'), form = $('#form');
-function openForm(d) {
+async function openForm(d) {
   editingId = d?.id ?? null;
   $('#dlgTitle').textContent = d ? 'Edit dispenser' : 'Add dispenser';
   form.name.value = d?.name ?? ''; form.location.value = d?.location ?? '';
   form.capacity_l.value = d?.capacity_l ?? 20; form.level_l.value = d?.level_l ?? 0;
   form.level_l.disabled = !!d;
   form.low_level_pct.value = d?.low_level_pct ?? ''; form.high_temp_c.value = d?.high_temp_c ?? '';
+  $('#careLabel').hidden = !isAdmin;
+  if (isAdmin) { // who gets the complaints for this dispenser
+    let carers = [];
+    try { carers = (await api('/users')).filter(u => u.role === 'caretaker'); } catch { /* leave the list empty */ }
+    form.caretaker.innerHTML = '<option value="">Every caretaker</option>' + carers.map(u => `<option value="${esc(u.username)}">${esc(u.username)}</option>`).join('');
+    form.caretaker.value = d?.caretaker_username ?? '';
+  }
   $('#formErr').textContent = ''; dlg.showModal();
 }
 $('#addBtn').onclick = () => openForm();
@@ -375,29 +388,169 @@ form.addEventListener('submit', async e => {
   // blank = use the server default (null clears an override when editing)
   body.low_level_pct = form.low_level_pct.value === '' ? null : +form.low_level_pct.value;
   body.high_temp_c = form.high_temp_c.value === '' ? null : +form.high_temp_c.value;
+  body.caretaker = form.caretaker.value || null;
   try {
     await (editingId === null ? api('/dispensers', 'POST', body) : api(`/dispensers/${editingId}`, 'PUT', body));
     dlg.close(); toast('Saved'); refresh();
   } catch (err) { $('#formErr').textContent = err.message; }
 });
 
+// ---------- complaints ----------
+const CAT = { NO_WATER: 'No water', LEAK: 'Leak', DIRTY: 'Dirty', BROKEN: 'Broken', OTHER: 'Other' };
+const ACTIVE = ['OPEN', 'ASSIGNED', 'IN_PROGRESS'];
+const timelines = new Map(); // complaint id -> loaded history (kept across the 5 s refresh)
+let cSig = '';
+
+// what needs this person's attention right now (shown in the tab title)
+function actionable() {
+  if (!me) return 0;
+  if (me.role === 'technician') return complaints.filter(c => ACTIVE.includes(c.status)).length;
+  if (isStaff()) return complaints.filter(c => c.status === 'OPEN').length;
+  return complaints.filter(c => c.status === 'RESOLVED').length;
+}
+
+function setComplaints(list) {
+  complaints = list || [];
+  const ids = new Set(complaints.map(c => c.id));
+  if (seenComplaints && isStaff()) { // toast when something new lands for the caretaker
+    const fresh = complaints.filter(c => c.status === 'OPEN' && !seenComplaints.has(c.id));
+    if (fresh.length) toast(`New complaint: ${fresh[0].dispenser_name} – ${CAT[fresh[0].category]}`);
+  }
+  seenComplaints = ids;
+  const n = actionable();
+  document.title = (n ? `(${n}) ` : '') + 'Smart Water Dispenser';
+  const sig = JSON.stringify([complaints, $('#cFilter').value, Math.floor(Date.now() / 60000)]); // minute bucket keeps the "5m ago" labels fresh
+  if (sig !== cSig) { cSig = sig; renderComplaints(); }
+}
+
+function complaintButtons(c) {
+  const staff = isStaff(), mineJob = me.role === 'technician' && c.technician === me.username, b = [];
+  const btn = (act, label, cls = '') => b.push(`<button class="sm ${cls}" data-cact="${act}" data-id="${c.id}">${label}</button>`);
+  if (staff && ACTIVE.includes(c.status)) btn('assign', c.technician ? 'Reassign…' : 'Assign technician…', 'primary');
+  if ((mineJob || staff) && c.status === 'ASSIGNED') btn('start', 'Start work');
+  if ((mineJob || staff) && ['ASSIGNED', 'IN_PROGRESS'].includes(c.status)) btn('resolve', 'Mark resolved…');
+  if (c.status === 'RESOLVED' && (c.reporter === me.username || staff)) btn('reopen', 'Still broken…');
+  if (staff && c.status !== 'CLOSED') btn('close', 'Close…');
+  btn('history', timelines.has(c.id) ? 'Hide history' : 'History');
+  return b.join('');
+}
+
+function timelineHTML(id) {
+  const ev = timelines.get(id);
+  return ev ? `<ol>${ev.map(e => `<li><b>${esc(e.action.replace('_', ' ').toLowerCase())}</b> by ${esc(e.actor || 'system')}${e.note ? ` – ${esc(e.note)}` : ''} <span>(${ago(e.created_at)})</span></li>`).join('')}</ol>` : '';
+}
+
+function renderComplaints() {
+  const f = $('#cFilter').value;
+  const list = complaints.filter(c => !f || (f === 'active' ? ACTIVE.includes(c.status) : c.status === f));
+  const open = complaints.filter(c => ACTIVE.includes(c.status)).length;
+  $('#cTitle').textContent = `${me?.role === 'technician' ? 'My jobs' : isStaff() ? 'Complaints' : 'My complaints'}${open ? ` (${open} open)` : ''}`;
+  $('#complaints').innerHTML = list.length ? list.map(c => `
+    <li class="cmp" data-cid="${c.id}">
+      <div class="cmp-head"><b>#${c.id} · ${esc(CAT[c.category])} · ${esc(c.dispenser_name)}</b><span class="badge c-${c.status}">${c.status.replace('_', ' ')}</span></div>
+      <div class="muted">${esc(c.dispenser_location)} · reported by ${esc(c.reporter || 'someone')} ${ago(c.created_at)}${c.technician ? ` · technician ${esc(c.technician)}` : ''}</div>
+      <p>${esc(c.description)}</p>
+      ${c.resolution_note ? `<p class="note">Fixed: ${esc(c.resolution_note)}</p>` : ''}
+      <div class="btns">${complaintButtons(c)}</div>
+      <div class="tl">${timelineHTML(c.id)}</div>
+    </li>`).join('')
+    : `<li class="empty">${complaints.length ? 'Nothing matches this filter.' : me?.role === 'technician' ? 'No jobs assigned to you.' : isStaff() ? 'No complaints. 🎉' : 'You have not reported anything. Use “Report a problem” if a dispenser needs attention.'}</li>`;
+}
+$('#cFilter').addEventListener('input', () => { cSig = ''; setComplaints(complaints); });
+
+// report a problem
+function openReport(dispenserId) {
+  const sel = $('#reportForm').dispenser_id;
+  sel.innerHTML = dispensers.map(d => `<option value="${d.id}">${esc(d.name)} – ${esc(d.location)}</option>`).join('');
+  if (dispenserId) sel.value = dispenserId;
+  $('#reportForm').description.value = ''; $('#reportErr').textContent = '';
+  $('#reportDlg').showModal();
+}
+$('#reportBtn').onclick = () => openReport();
+$('#reportForm').addEventListener('submit', async e => {
+  e.preventDefault(); const f = e.target;
+  try {
+    await api('/complaints', 'POST', { dispenser_id: +f.dispenser_id.value, category: f.category.value, description: f.description.value });
+    $('#reportDlg').close(); toast('Complaint sent. The caretaker has been notified.'); refresh();
+  } catch (err) { $('#reportErr').textContent = err.message; }
+});
+
+// assign / progress
+let assignFor = null, noteFor = null;
+async function openAssign(c) {
+  assignFor = c; $('#assignErr').textContent = '';
+  $('#assignTitle').textContent = `Assign complaint #${c.id}`;
+  const sel = $('#assignForm').technician;
+  try {
+    const techs = await api('/technicians');
+    sel.innerHTML = techs.map(t => `<option value="${esc(t.username)}">${esc(t.username)} (${t.open_jobs} open job${t.open_jobs === 1 ? '' : 's'})</option>`).join('');
+    $('#assignHint').textContent = techs.length ? 'Sorted by fewest open jobs.' : 'There are no technicians yet. An admin can add them under Users.';
+    if (c.technician) sel.value = c.technician;
+  } catch (err) { $('#assignErr').textContent = err.message; }
+  $('#assignDlg').showModal();
+}
+$('#assignForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  try {
+    await api(`/complaints/${assignFor.id}/assign`, 'POST', { technician: e.target.technician.value });
+    $('#assignDlg').close(); toast('Technician assigned and notified'); refresh();
+  } catch (err) { $('#assignErr').textContent = err.message; }
+});
+
+const NOTE = {
+  resolve: { status: 'RESOLVED', title: 'Mark as resolved', label: 'What did you do to fix it?', go: 'Mark resolved' },
+  reopen: { status: 'OPEN', title: 'Still not fixed', label: 'What is still wrong?', go: 'Reopen' },
+  close: { status: 'CLOSED', title: 'Close complaint', label: 'Reason (required unless it was fixed)', go: 'Close it' },
+};
+function openNote(kind, c) {
+  noteFor = { kind, id: c.id }; $('#noteErr').textContent = '';
+  $('#noteTitle').textContent = `${NOTE[kind].title} · #${c.id}`; $('#noteLabel').textContent = NOTE[kind].label; $('#noteGo').textContent = NOTE[kind].go;
+  $('#noteForm').note.value = ''; $('#noteForm').note.required = !(kind === 'close' && c.status === 'RESOLVED');
+  $('#noteDlg').showModal();
+}
+$('#noteForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  try {
+    await api(`/complaints/${noteFor.id}/status`, 'POST', { status: NOTE[noteFor.kind].status, note: e.target.note.value });
+    $('#noteDlg').close(); toast('Updated'); refresh();
+  } catch (err) { $('#noteErr').textContent = err.message; }
+});
+
+$('#complaints').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-cact]'); if (!b) return;
+  const c = complaints.find(x => x.id === +b.dataset.id); if (!c) return;
+  try {
+    switch (b.dataset.cact) {
+      case 'assign': return openAssign(c);
+      case 'start': await api(`/complaints/${c.id}/status`, 'POST', { status: 'IN_PROGRESS' }); toast('Marked in progress'); break;
+      case 'history':
+        if (timelines.has(c.id)) timelines.delete(c.id); else timelines.set(c.id, (await api(`/complaints/${c.id}`)).events);
+        cSig = ''; return setComplaints(complaints);
+      default: return openNote(b.dataset.cact, c);
+    }
+    refresh();
+  } catch (err) { toast(err.message); }
+});
+
 // ---------- users (admin) ----------
+const ROLE_OPTIONS = ['viewer', 'technician', 'caretaker', 'admin'];
 async function loadUsers() {
   const users = await api('/users');
   $('#userList').innerHTML = users.map(u => `
-    <li><span><b>${esc(u.username)}</b> <small class="muted">${esc(u.email || 'no email')}</small> <span class="badge ${u.role === 'admin' ? 'OK' : 'OFFLINE'}">${u.role}</span></span>
+    <li><span><b>${esc(u.username)}</b> <small class="muted">${esc(u.email || 'no email')}</small> <span class="badge ${u.role === 'admin' ? 'OK' : 'OFFLINE'}">${roleLabel(u.role)}</span></span>
     ${u.username === me.username ? '<span class="muted">you</span>' : `<span>
-      <button class="sm" data-role="${esc(u.username)}" data-to="${u.role === 'admin' ? 'viewer' : 'admin'}">Make ${u.role === 'admin' ? 'viewer' : 'admin'}</button>
+      <select class="sm" data-role-for="${esc(u.username)}" aria-label="Role of ${esc(u.username)}">${ROLE_OPTIONS.map(r => `<option value="${r}"${r === u.role ? ' selected' : ''}>${roleLabel(r)}</option>`).join('')}</select>
       <button class="sm danger" data-del="${esc(u.username)}">Remove</button></span>`}</li>`).join('');
 }
 $('#usersBtn').onclick = async () => { $('#userErr').textContent = ''; $('#usersDlg').showModal(); try { await loadUsers(); } catch (e) { $('#userErr').textContent = e.message; } };
+$('#userList').addEventListener('change', async e => {
+  const u = e.target.dataset.roleFor; if (!u) return;
+  try { await api(`/users/${encodeURIComponent(u)}/role`, 'PUT', { role: e.target.value }); toast(`${u} is now ${roleLabel(e.target.value)}`); }
+  catch (err) { $('#userErr').textContent = err.message; }
+  loadUsers();
+});
 $('#userList').addEventListener('click', async e => {
-  if (e.target.dataset.role) {
-    try { await api(`/users/${encodeURIComponent(e.target.dataset.role)}/role`, 'PUT', { role: e.target.dataset.to }); loadUsers(); }
-    catch (err) { $('#userErr').textContent = err.message; }
-    return;
-  }
-  const u = e.target.dataset.del; if (!u || !confirm(`Remove user ${u}?`)) return;
+  const u = e.target.dataset.del; if (!u || !confirm(`Remove user ${u}? Their open jobs and dispensers go back to the caretakers.`)) return;
   try { await api('/users/' + encodeURIComponent(u), 'DELETE'); loadUsers(); } catch (err) { $('#userErr').textContent = err.message; }
 });
 $('#userForm').addEventListener('submit', async e => {

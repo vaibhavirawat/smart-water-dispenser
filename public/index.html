@@ -50,6 +50,20 @@
     <div id="list" aria-live="off"><div class="skgrid"><div class="sk-tank sk"></div><div class="sk-tank sk"></div><div class="sk-tank sk"></div></div></div>
   </section>
 
+  <section class="panel" id="complaintsPanel" aria-labelledby="cTitle" hidden>
+    <div class="panel-head">
+      <h2 id="cTitle">Complaints</h2>
+      <div class="row-actions">
+        <select id="cFilter" aria-label="Filter complaints by status">
+          <option value="">All</option><option value="active">Needs action</option>
+          <option>OPEN</option><option>ASSIGNED</option><option>IN_PROGRESS</option><option>RESOLVED</option><option>CLOSED</option>
+        </select>
+        <button id="reportBtn" class="primary">+ Report a problem</button>
+      </div>
+    </div>
+    <ul id="complaints" class="complaints"></ul>
+  </section>
+
   <section class="grid">
     <div class="panel">
       <div class="panel-head"><h2>Alerts</h2><label class="chk"><input type="checkbox" id="showResolved"> Show resolved</label></div>
@@ -74,12 +88,50 @@
     <label>Location <input name="location" required maxlength="120"></label>
     <label>Capacity (L) <input name="capacity_l" type="number" min="1" step="0.1" value="20" required></label>
     <label>Current level (L) <input name="level_l" type="number" min="0" step="0.1" value="0"></label>
+    <label id="careLabel" hidden>Caretaker (gets complaints for this dispenser) <select name="caretaker"><option value="">Every caretaker</option></select></label>
     <details class="adv"><summary>Alert thresholds (optional)</summary>
       <label>Low-level alert below (%) <input name="low_level_pct" type="number" min="1" max="99" step="1" placeholder="server default (20)"></label>
       <label>High-temperature alert above (°C) <input name="high_temp_c" type="number" min="0" max="100" step="0.5" placeholder="server default (25)"></label>
     </details>
     <p id="formErr" class="err"></p>
     <div class="actions"><button type="button" data-close>Cancel</button><button type="submit" class="primary">Save</button></div>
+  </form>
+</dialog>
+
+<!-- report a problem -->
+<dialog id="reportDlg">
+  <form id="reportForm" autocomplete="off">
+    <h3>Report a problem</h3>
+    <label>Dispenser <select name="dispenser_id" required></select></label>
+    <label>What is wrong?
+      <select name="category" required>
+        <option value="NO_WATER">No water</option><option value="LEAK">Leak</option>
+        <option value="DIRTY">Dirty / unhygienic</option><option value="BROKEN">Broken or not working</option><option value="OTHER">Other</option>
+      </select></label>
+    <label>Details <textarea name="description" required minlength="5" maxlength="500" rows="4" placeholder="Tell the caretaker what you saw"></textarea></label>
+    <p id="reportErr" class="err" role="alert"></p>
+    <div class="actions"><button type="button" data-close>Cancel</button><button class="primary">Send complaint</button></div>
+  </form>
+</dialog>
+
+<!-- assign a technician -->
+<dialog id="assignDlg">
+  <form id="assignForm">
+    <h3 id="assignTitle">Assign a technician</h3>
+    <label>Technician <select name="technician" required></select></label>
+    <p class="muted" id="assignHint"></p>
+    <p id="assignErr" class="err" role="alert"></p>
+    <div class="actions"><button type="button" data-close>Cancel</button><button class="primary">Assign</button></div>
+  </form>
+</dialog>
+
+<!-- a note for resolve / reopen / close -->
+<dialog id="noteDlg">
+  <form id="noteForm">
+    <h3 id="noteTitle"></h3>
+    <label><span id="noteLabel">Note</span> <textarea name="note" required minlength="3" maxlength="500" rows="3"></textarea></label>
+    <p id="noteErr" class="err" role="alert"></p>
+    <div class="actions"><button type="button" data-close>Cancel</button><button class="primary" id="noteGo">Save</button></div>
   </form>
 </dialog>
 
@@ -103,7 +155,7 @@
     <input name="username" placeholder="username" required minlength="3" maxlength="30">
     <input name="email" type="email" placeholder="email (optional)">
     <input name="password" type="password" placeholder="password (8+)" required minlength="8">
-    <select name="role"><option value="viewer">viewer</option><option value="admin">admin</option></select>
+    <select name="role" aria-label="Role"><option value="viewer">user</option><option value="technician">technician</option><option value="caretaker">caretaker</option><option value="admin">admin</option></select>
     <button class="primary">Add user</button>
   </form>
   <p id="userErr" class="err"></p>

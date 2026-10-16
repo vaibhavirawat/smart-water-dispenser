@@ -119,3 +119,17 @@ dialog label{display:block;margin:10px 0;font-size:12px;color:var(--muted)}dialo
 
 .offline-bar{background:#e39b0b22;border-bottom:1px solid var(--amber);color:var(--text);padding:8px 24px;font-size:13px;text-align:center}
 .offline-bar[hidden]{display:none}
+
+/* complaints */
+.row-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.complaints{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.cmp{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--bg)}
+.cmp-head{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}
+.cmp p{margin:6px 0}.cmp .note{border-left:3px solid var(--green);padding-left:8px;color:var(--muted)}
+.cmp .btns{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.cmp ol{margin:8px 0 0;padding-left:18px;color:var(--muted);font-size:12px}
+.c-OPEN{background:var(--red)}.c-ASSIGNED{background:var(--amber)}.c-IN_PROGRESS{background:var(--blue)}.c-RESOLVED{background:var(--green)}.c-CLOSED{background:var(--grey)}
+dialog textarea{display:block;width:100%;margin-top:4px;border:1px solid var(--line);background:var(--panel);border-radius:9px;padding:8px 10px;font:inherit;color:inherit;resize:vertical}
+dialog textarea:focus,dialog select:focus{border-color:var(--blue);box-shadow:0 0 0 3px #1e88e533;outline:none}
+dialog label select{display:block;width:100%;margin-top:4px}
+#complaintsPanel{margin-top:16px}

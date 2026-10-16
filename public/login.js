@@ -50,7 +50,7 @@ function setMode(m, keepMessage) {
   $('u-label').textContent = m === 'forgot' ? 'Username or email' : 'Username';
   $('p-label').textContent = m === 'reset' ? 'New password' : 'Password';
   $('p').autocomplete = m === 'in' ? 'current-password' : 'new-password';
-  $('foot').textContent = m === 'up' ? 'Accounts you create here are read-only.'
+  $('foot').textContent = m === 'up' ? 'Accounts created here can browse dispensers and report problems.'
     : m === 'in' ? (signupOn ? 'New here? Choose “Create account”.' : 'Contact an administrator if you need an account.') : '';
   go.disabled = false; go.classList.remove('loading');
   const first = ALL.concat([]).map($).find(el => !el.hidden && el.querySelector('input'));

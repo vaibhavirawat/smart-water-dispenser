@@ -18,7 +18,8 @@ Node.js · Express · MySQL · HTML/CSS/JS
 A full-stack system for monitoring a fleet of smart water dispensers: devices report water level and temperature to a REST API backed by MySQL, and a live dashboard shows tank levels, usage trends and alerts.
 
 ## Features
-- **Animated login + self sign-up** (Sign in / Create account tabs, password-strength meter, confirm password, show/hide, shake-on-error). New sign-ups are always read-only viewers; set `ALLOW_SIGNUP=false` to turn sign-up off
+- **Animated login + self sign-up** (Sign in / Create account tabs, password-strength meter, confirm password, show/hide, shake-on-error). Anyone can create an account (set `ALLOW_SIGNUP=false` to turn sign-up off); new accounts are ordinary **users** who can browse every dispenser and report problems, but cannot change anything
+- **Complaints with a repair workflow**: a user reports a problem (no water, leak, dirty, broken, other) → the dispenser's **caretaker** is emailed → the caretaker **assigns a technician** (emailed, with the reporter told) → the technician marks it in progress and resolved with a note → the reporter is emailed and can reopen it if it is not fixed. Every step is kept in a history timeline
 - **Live dashboard** (auto-refresh every 5 s) with animated water-tank gauges, count-up stats and a cards/table view
 - **Dark / light theme**, search (`/` to focus), status filter and sort (name, lowest level, needs attention, most used)
 - **Dispenser detail view**: 24-hour level history chart and recent dispenses
@@ -26,11 +27,20 @@ A full-stack system for monitoring a fleet of smart water dispensers: devices re
 - **Email alerts** to administrators the moment a new alert opens (30-minute cooldown per dispenser and type; set `ALERT_EMAILS=false` to turn off)
 - **Time-to-empty forecast** on every dispenser, from the last 24 hours of usage
 - **Accessible and responsive**: keyboard navigation, screen-reader labels, skip link, reduced-motion support, phone layout, loading skeletons
-- **Role-based access**: admins manage dispensers and users; viewers get a read-only dashboard
+- **Role-based access** (enforced by the API, not just the UI):
+
+  | Role | Can do |
+  |---|---|
+  | user (sign up yourself) | browse all dispensers, report problems, follow and reopen their own complaints |
+  | technician | everything a user can, plus see and work the jobs assigned to them |
+  | caretaker | everything a user can, plus see complaints for the dispensers they look after (or any dispenser with no caretaker), assign technicians, close complaints |
+  | admin | everything: dispensers, users and roles, which caretaker looks after which dispenser |
+
+  Admins create caretaker and technician accounts (or promote a user) under **Users**, and pick a dispenser's caretaker in its **Edit** form. A dispenser without a caretaker notifies every caretaker and admin.
 - **Forgot password**: single-use, 1-hour reset links (hashed in the database); changing or resetting a password signs out all other sessions
 - **User management** (add, remove, promote/demote) and **change password** from the UI
 - **CSV export** of dispense history
-- Device simulator, ESP32 firmware, Docker Compose, 61 automated tests, ESLint and CI (Node 20 and 22)
+- Device simulator, ESP32 firmware, Docker Compose, 74 automated tests, ESLint and CI (Node 20 and 22)
 
 <details><summary>More screenshots</summary>
 <p><img src="docs/detail.png" alt="Dispenser detail" width="80%"></p>
@@ -46,10 +56,10 @@ A full-stack system for monitoring a fleet of smart water dispensers: devices re
 server.js            app wiring: security headers, static files, routers, background job
 src/config.js        environment settings        src/db.js    MySQL pool + transactions
 src/http.js          errors, validation helpers  auth.js      scrypt hashing, signed sessions
-src/routes/          auth, users, dispensers (+ device API), analytics
-src/services/        dispenser status/forecast, alerts, email notifications, analytics queries
+src/routes/          auth, users, dispensers (+ device API), analytics, complaints
+src/services/        dispenser status/forecast, alerts, complaints workflow, email notifications, analytics queries
 public/              dashboard (app.js, style.css), login page, sample.js (offline demo data), sw.js (offline shell)
-test/                helpers.js + accounts, dispensers, features, recovery tests
+test/                helpers.js + accounts, dispensers, features, complaints, recovery tests
 ```
 
 ## Architecture
@@ -80,6 +90,11 @@ Devices / simulator ──HTTP──▶ Express REST API ──▶ MySQL
 | GET | /api/dashboard | stats, dispensers, alerts and usage charts in one call (what the UI polls) |
 | GET | /api/stats, /api/usage/daily, /api/usage/hourly | the same data as separate endpoints |
 | GET | /api/dispensers/:id/refills | recent refills |
+| POST/GET | /api/complaints | report a problem / list the complaints you may see (role-scoped) |
+| GET | /api/complaints/:id | one complaint with its history |
+| POST | /api/complaints/:id/assign | caretaker or admin assigns a technician |
+| POST | /api/complaints/:id/status | `IN_PROGRESS`, `RESOLVED` (note), `CLOSED`, or `OPEN` to reopen (note) |
+| GET | /api/technicians (caretaker) | technicians with their open job counts |
 | GET | /api/export/events.csv?days=30 | CSV download |
 | GET/POST/DELETE | /api/users (admin) | user management |
 | POST | /api/auth/login, /register, /logout, /password · GET /api/auth/me, /config | authentication |
@@ -116,7 +131,7 @@ See [DEPLOY.md](DEPLOY.md) for putting it online with HTTPS (Railway + managed M
 
 ## Tests and linting
 ```bash
-npm test        # 61 integration tests
+npm test        # 74 integration tests
 npm run lint    # ESLint
 ```
 The integration tests (Node's built-in test runner, one file per area in `test/`) run the real app against throwaway `smart_water_test_<area>` databases that are created and dropped automatically, so they run in parallel and never touch your data. They cover login and roles, forged cookies, input validation, dispense/refill logic, alert dedupe and auto-resolve, offline detection, device API-key auth, analytics, cascade deletes, and a concurrency test proving 20 simultaneous dispenses can never overdraw a 5 L tank.
